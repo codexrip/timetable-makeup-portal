@@ -1,0 +1,91 @@
+@page "/teacher/my-timetable"
+@attribute [Authorize(Roles = "Teacher")]
+@inject CurrentUserService CurrentUser
+@inject TimetableService TimetableService
+
+<PageTitle>My Timetable</PageTitle>
+
+<div class="portal-page-header">
+    <div>
+        <h1 class="portal-page-title">My Timetable</h1>
+        <p class="text-muted small mb-0">
+            Showing week of <strong>@WeekRangeLabel</strong>
+        </p>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="btn-group btn-group-sm" role="group" aria-label="Week Navigation">
+            <button type="button" class="btn btn-outline-secondary" @onclick="() => ShiftWeekAsync(-7)">
+                <i class="bi bi-chevron-left"></i> Prev
+            </button>
+            <button type="button" class="btn btn-outline-secondary" @onclick="GoToCurrentWeekAsync">
+                This Week
+            </button>
+            <button type="button" class="btn btn-outline-secondary" @onclick="() => ShiftWeekAsync(7)">
+                Next <i class="bi bi-chevron-right"></i>
+            </button>
+        </div>
+        <a href="/teacher/makeup-requests" class="btn btn-primary btn-sm">
+            <i class="bi bi-calendar-plus me-1"></i>Request Makeup Class
+        </a>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <div class="d-flex align-items-center text-muted py-4">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+        <span>Loading weekly timetable...</span>
+    </div>
+}
+else
+{
+    <TimetableGrid Entries="entries"
+                   ShowTeacher="false"
+                   ShowSection="true"
+                   EmptyMessage="No weekly lectures are scheduled for you in this week." />
+}
+
+@code {
+    private bool isLoading = true;
+    private string? teacherId;
+    private DateTime weekReferenceDate = DateTime.Today;
+    private List<TimetableSlotView> entries = new();
+
+    private string WeekRangeLabel
+    {
+        get
+        {
+            var (start, _) = TimetableService.GetWeekRange(weekReferenceDate);
+            var friday = start.AddDays(4);
+            return $"{start:dd MMM} - {friday:dd MMM yyyy}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        teacherId = await CurrentUser.GetTeacherIdAsync();
+        await LoadTimetableAsync();
+    }
+
+    private async Task LoadTimetableAsync()
+    {
+        isLoading = true;
+        if (!string.IsNullOrEmpty(teacherId))
+        {
+            entries = await TimetableService.GetTeacherTimetableAsync(teacherId, weekReferenceDate);
+        }
+        isLoading = false;
+    }
+
+    private async Task ShiftWeekAsync(int days)
+    {
+        weekReferenceDate = weekReferenceDate.AddDays(days);
+        await LoadTimetableAsync();
+    }
+
+    private async Task GoToCurrentWeekAsync()
+    {
+        weekReferenceDate = DateTime.Today;
+        await LoadTimetableAsync();
+    }
+}

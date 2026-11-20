@@ -1,0 +1,9 @@
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Force full HTTP load so /login renders in static SSR mode for cookie sign-in
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+}

@@ -1,0 +1,55 @@
+@* Displays makeup request status (including computed Overdue when ApprovedDate < today) *@
+
+<span class="badge rounded-pill px-3 py-2 @CssClass">
+    <i class="bi @Icon me-1"></i>@Label
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public MakeupRequestStatus Status { get; set; }
+
+    [Parameter]
+    public DateTime? ApprovedDate { get; set; }
+
+    private bool IsOverdue =>
+        Status == MakeupRequestStatus.Approved
+        && ApprovedDate.HasValue
+        && ApprovedDate.Value.Date < DateTime.Today;
+
+    private string Label => IsOverdue
+        ? "Overdue"
+        : Status switch
+        {
+            MakeupRequestStatus.ReviewRequested => "Review Requested",
+            MakeupRequestStatus.NotHeld => "Not Held",
+            _ => Status.ToString()
+        };
+
+    private string CssClass => IsOverdue
+        ? "status-overdue"
+        : Status switch
+        {
+            MakeupRequestStatus.Pending => "status-pending",
+            MakeupRequestStatus.ReviewRequested => "status-review",
+            MakeupRequestStatus.Approved => "status-approved",
+            MakeupRequestStatus.Rejected => "status-rejected",
+            MakeupRequestStatus.Held => "bg-primary text-white",
+            MakeupRequestStatus.NotHeld => "bg-dark text-white",
+            MakeupRequestStatus.Withdrawn => "bg-secondary text-white",
+            _ => "status-pending"
+        };
+
+    private string Icon => IsOverdue
+        ? "bi-exclamation-triangle-fill"
+        : Status switch
+        {
+            MakeupRequestStatus.Pending => "bi-hourglass-split",
+            MakeupRequestStatus.ReviewRequested => "bi-pencil-square",
+            MakeupRequestStatus.Approved => "bi-check-circle-fill",
+            MakeupRequestStatus.Rejected => "bi-x-circle-fill",
+            MakeupRequestStatus.Held => "bi-check2-all",
+            MakeupRequestStatus.NotHeld => "bi-slash-circle-fill",
+            MakeupRequestStatus.Withdrawn => "bi-arrow-counterclockwise",
+            _ => "bi-hourglass-split"
+        };
+}

@@ -1,0 +1,23 @@
+@page "/"
+@attribute [Authorize(Roles = "Coordinator,Teacher")]
+@inject CurrentUserService CurrentUser
+@inject NavigationManager Navigation
+
+<PageTitle>Timetable &amp; Makeup Portal</PageTitle>
+
+<div class="p-3 text-muted">Redirecting to your dashboard...</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var role = await CurrentUser.GetRoleAsync();
+        var target = role switch
+        {
+            Role.Coordinator => "/coordinator/dashboard",
+            Role.Teacher => "/teacher/dashboard",
+            _ => "/access-denied"
+        };
+
+        Navigation.NavigateTo(target, replace: true);
+    }
+}

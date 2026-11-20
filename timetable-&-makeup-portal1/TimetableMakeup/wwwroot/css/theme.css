@@ -1,0 +1,91 @@
+/* ==========================================================================
+   Theme Variables & Global Color Tokens
+   ========================================================================== */
+:root {
+    /* Portal Brand & Layout Variables */
+    --app-header-from: #17507f;
+    --app-header-to: #2b90d9;
+    --app-bg: #f5f8fc;
+    --app-sidebar-bg: #f1f3f6;
+    --app-surface: #ffffff;
+    --app-border: #e2e8f0;
+    --app-text-main: #1e293b;
+    --app-text-muted: #64748b;
+
+    /* Layout Dimensions */
+    --header-height: 65px;
+    --sidebar-width: 300px;
+    --sidebar-width-collapsed: 70px;
+
+    /* Status Colors (Bootstrap semantic mapping) */
+    --status-pending: #ffc107;
+    --status-pending-bg: #fff8e1;
+    --status-approved: #198754;
+    --status-approved-bg: #e8f5e9;
+    --status-rejected: #dc3545;
+    --status-rejected-bg: #fdecea;
+
+    /* Bootstrap 5 CSS Variable Overrides */
+    --bs-primary: #17507f;
+    --bs-primary-rgb: 23, 80, 127;
+    --bs-secondary: #64748b;
+    --bs-success: #198754;
+    --bs-warning: #ffc107;
+    --bs-danger: #dc3545;
+    --bs-body-bg: var(--app-bg);
+    --bs-body-color: var(--app-text-main);
+    --bs-font-sans-serif: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+    background-color: var(--app-bg);
+    color: var(--app-text-main);
+    font-family: var(--bs-font-sans-serif);
+    margin: 0;
+    min-height: 100vh;
+}
+
+/* Reusable status badge utilities */
+.status-pending {
+    background-color: var(--bs-warning);
+    color: #212529;
+}
+
+.status-approved {
+    background-color: var(--bs-success);
+    color: #ffffff;
+}
+
+.status-rejected {
+    background-color: var(--bs-danger);
+    color: #ffffff;
+}
+
+.status-overdue {
+    background-color: #fd7e14;
+    color: #ffffff;
+}
+
+.status-review {
+    background-color: #0dcaf0;
+    color: #212529;
+}
+
+/* Consistent portal card & table polish */
+.portal-content .card {
+    border-radius: 10px;
+}
+
+.portal-content .table thead th {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--app-text-muted);
+    font-weight: 700;
+}
+
+.validation-message {
+    font-size: 0.82rem;
+    color: var(--bs-danger);
+    margin-top: 0.25rem;
+}

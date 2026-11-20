@@ -1,0 +1,140 @@
+@page "/coordinator/teacher-timetables"
+@attribute [Authorize(Roles = "Coordinator")]
+@inject CurrentUserService CurrentUser
+@inject TimetableService TimetableService
+
+<PageTitle>Teacher Timetables</PageTitle>
+
+<div class="portal-page-header">
+    <div>
+        <h1 class="portal-page-title">Teacher Timetables</h1>
+        <p class="text-muted small mb-0">Week of <strong>@WeekRangeLabel</strong></p>
+    </div>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Week Navigation">
+        <button type="button" class="btn btn-outline-secondary" @onclick="() => ShiftWeekAsync(-7)">
+            <i class="bi bi-chevron-left"></i> Prev
+        </button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="GoToCurrentWeekAsync">
+            This Week
+        </button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="() => ShiftWeekAsync(7)">
+            Next <i class="bi bi-chevron-right"></i>
+        </button>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <div class="d-flex align-items-center text-muted py-4">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+        <span>Loading teachers...</span>
+    </div>
+}
+else if (teachers.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-muted py-5">
+            No teachers found in your program.
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row align-items-end g-3">
+                <div class="col-md-5">
+                    <label for="teacherSelect" class="form-label fw-semibold small">Select Teacher</label>
+                    <select id="teacherSelect"
+                            class="form-select"
+                            @bind="selectedTeacherId"
+                            @bind:after="LoadTimetableAsync">
+                        @foreach (var t in teachers)
+                        {
+                            <option value="@t.Id">@t.FullName (@t.EmployeeCode)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-7 text-muted small">
+                    Regular classes repeat weekly; approved makeup classes appear only in the week of their scheduled date.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoadingGrid)
+    {
+        <div class="d-flex align-items-center text-muted py-3">
+            <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+            <span>Loading timetable...</span>
+        </div>
+    }
+    else
+    {
+        <TimetableGrid Entries="entries"
+                       ShowTeacher="false"
+                       ShowSection="true"
+                       HighlightFreeSlots="true" />
+    }
+}
+
+@code {
+    private bool isLoading = true;
+    private bool isLoadingGrid;
+    private string? programId;
+    private string selectedTeacherId = string.Empty;
+    private DateTime weekReferenceDate = DateTime.Today;
+    private List<Teacher> teachers = new();
+    private List<TimetableSlotView> entries = new();
+
+    private string WeekRangeLabel
+    {
+        get
+        {
+            var (start, _) = TimetableService.GetWeekRange(weekReferenceDate);
+            var friday = start.AddDays(4);
+            return $"{start:dd MMM} - {friday:dd MMM yyyy}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        programId = await CurrentUser.GetProgramIdAsync();
+        if (!string.IsNullOrEmpty(programId))
+        {
+            teachers = await TimetableService.GetProgramTeachersAsync(programId);
+            if (teachers.Count > 0)
+            {
+                selectedTeacherId = teachers[0].Id;
+                await LoadTimetableAsync();
+            }
+        }
+
+        isLoading = false;
+    }
+
+    private async Task LoadTimetableAsync()
+    {
+        if (string.IsNullOrEmpty(programId) || string.IsNullOrEmpty(selectedTeacherId))
+        {
+            entries = new();
+            return;
+        }
+
+        isLoadingGrid = true;
+        entries = await TimetableService.GetProgramTeacherTimetableAsync(programId, selectedTeacherId, weekReferenceDate);
+        isLoadingGrid = false;
+    }
+
+    private async Task ShiftWeekAsync(int days)
+    {
+        weekReferenceDate = weekReferenceDate.AddDays(days);
+        await LoadTimetableAsync();
+    }
+
+    private async Task GoToCurrentWeekAsync()
+    {
+        weekReferenceDate = DateTime.Today;
+        await LoadTimetableAsync();
+    }
+}

@@ -1,0 +1,698 @@
+@page "/coordinator/makeup-requests"
+@attribute [Authorize(Roles = "Coordinator")]
+@inject CurrentUserService CurrentUser
+@inject MakeupService MakeupService
+@inject MakeupAvailabilityService AvailabilityService
+
+<PageTitle>Makeup Requests (Coordinator)</PageTitle>
+
+<div class="portal-page-header">
+    <h1 class="portal-page-title">Makeup Requests</h1>
+    <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Status Filter">
+        <button type="button"
+                class="btn @(activeTab == FilterTab.Pending ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => activeTab = FilterTab.Pending">
+            Pending (@allRequests.Count(r => r.Status == MakeupRequestStatus.Pending))
+        </button>
+        <button type="button"
+                class="btn @(activeTab == FilterTab.ReviewRequested ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => activeTab = FilterTab.ReviewRequested">
+            Review Requested (@allRequests.Count(r => r.Status == MakeupRequestStatus.ReviewRequested))
+        </button>
+        <button type="button"
+                class="btn @(activeTab == FilterTab.Approved ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => activeTab = FilterTab.Approved">
+            Approved (@allRequests.Count(r => r.Status == MakeupRequestStatus.Approved))
+        </button>
+        <button type="button"
+                class="btn @(activeTab == FilterTab.HeldOutcome ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => activeTab = FilterTab.HeldOutcome">
+            Held/Not Held (@allRequests.Count(r => r.Status is MakeupRequestStatus.Held or MakeupRequestStatus.NotHeld))
+        </button>
+        <button type="button"
+                class="btn @(activeTab == FilterTab.Rejected ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => activeTab = FilterTab.Rejected">
+            Rejected (@allRequests.Count(r => r.Status == MakeupRequestStatus.Rejected))
+        </button>
+        <button type="button"
+                class="btn @(activeTab == FilterTab.All ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => activeTab = FilterTab.All">
+            All (@allRequests.Count)
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(feedbackMessage))
+{
+    <div class="alert @(feedbackIsError ? "alert-danger" : "alert-success") alert-dismissible fade show" role="alert">
+        @feedbackMessage
+        <button type="button" class="btn-close" @onclick="() => feedbackMessage = null" aria-label="Close"></button>
+    </div>
+}
+
+@if (selectedRequest is not null)
+{
+    <div class="card border-primary shadow-sm mb-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">
+                <i class="bi bi-calendar2-check me-2"></i>
+                Review Request: @selectedRequest.CourseCode (@selectedRequest.SectionName) &mdash; @selectedRequest.TeacherName
+            </span>
+            <button type="button" class="btn-close btn-close-white" @onclick="CloseReviewPanel" aria-label="Close"></button>
+        </div>
+        <div class="card-body">
+            @* Request summary details *@
+            <div class="row g-3 mb-3 small">
+                <div class="col-md-3">
+                    <span class="text-muted d-block">Teacher</span>
+                    <strong>@selectedRequest.TeacherName</strong>
+                </div>
+                <div class="col-md-4">
+                    <span class="text-muted d-block">Course &amp; Section</span>
+                    <strong>@selectedRequest.CourseCode - @selectedRequest.CourseTitle</strong>
+                    <div class="text-muted">
+                        Section: @selectedRequest.SectionName (@selectedRequest.SectionStudentCount students)
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <span class="text-muted d-block">Missed Lecture</span>
+                    <strong>@selectedRequest.MissedDate.ToString("ddd, dd MMM yyyy")</strong>
+                    <div class="text-muted">@FormatSlotBlock(selectedRequest.MissedSlotNumber, selectedRequest.DurationHours)</div>
+                </div>
+                <div class="col-md-2">
+                    <span class="text-muted d-block">Duration</span>
+                    <strong>@selectedRequest.DurationHours @(selectedRequest.DurationHours == 1 ? "hour" : "hours")</strong>
+                </div>
+                <div class="col-12">
+                    <span class="text-muted d-block">Teacher's Reason</span>
+                    <div class="p-2 bg-light rounded border">@selectedRequest.Reason</div>
+                </div>
+            </div>
+
+            <hr />
+
+            @* Teacher's Preferred Slots as radio options + per-slot room dropdown *@
+            <div class="mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold small">
+                        Teacher's Preferred Slots (@preferredOptions.Count)
+                    </span>
+                    <span class="text-muted" style="font-size: 0.78rem;">
+                        <i class="bi bi-shield-check text-success me-1"></i>Room options match lab type, capacity &amp; full block availability
+                    </span>
+                </div>
+
+                @if (isLoadingPreferredOptions)
+                {
+                    <div class="d-flex align-items-center text-muted small py-2">
+                        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+                        <span>Checking free rooms and block conflicts for preferred slots...</span>
+                    </div>
+                }
+                else if (preferredOptions.Count == 0)
+                {
+                    <div class="alert alert-warning small mb-0">
+                        This request has no preferred slots attached. You may request review or reject it with a note.
+                    </div>
+                }
+                else
+                {
+                    <div class="d-flex flex-column gap-2">
+                        @foreach (var opt in preferredOptions)
+                        {
+                            var isSelected = opt.Key == selectedOptionKey;
+                            <div class="p-3 rounded border @(opt.IsAvailable ? (isSelected ? "border-primary bg-primary-subtle" : "bg-white") : "bg-light text-muted")">
+                                <div class="row g-2 align-items-center">
+                                    <div class="col-md-6">
+                                        <div class="form-check mb-0">
+                                            <input class="form-check-input"
+                                                   type="radio"
+                                                   name="preferredSlotRadio"
+                                                   id="pref_@opt.Key"
+                                                   disabled="@(!opt.IsAvailable)"
+                                                   checked="@isSelected"
+                                                   @onchange="() => selectedOptionKey = opt.Key" />
+                                            <label class="form-check-label small" for="pref_@opt.Key">
+                                                <strong>@opt.Date.ToString("ddd, dd MMM yyyy")</strong>
+                                                <span class="ms-2">@FormatSlotBlock(opt.StartSlot, opt.DurationHours)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        @if (opt.IsAvailable)
+                                        {
+                                            <div class="d-flex align-items-center gap-2">
+                                                <label for="room_@opt.Key" class="small fw-semibold text-nowrap mb-0">Room:</label>
+                                                <select id="room_@opt.Key"
+                                                        class="form-select form-select-sm"
+                                                        @bind="opt.SelectedRoomId"
+                                                        @onclick="() => selectedOptionKey = opt.Key">
+                                                    @foreach (var r in opt.FreeRooms)
+                                                    {
+                                                        <option value="@r.Id">@r.Code (@(r.IsLab ? "Lab" : "Classroom"), Cap @r.Capacity)</option>
+                                                    }
+                                                </select>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">
+                                                <i class="bi bi-x-circle me-1"></i>No longer available
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="mb-3">
+                <label for="coordinatorNote" class="form-label fw-semibold small">
+                    Coordinator Note / Remarks <span class="text-muted fw-normal">(required for Reject or Request Review)</span>
+                </label>
+                <textarea id="coordinatorNote"
+                          class="form-control form-control-sm @(string.IsNullOrEmpty(noteValidationError) ? "" : "is-invalid")"
+                          rows="2"
+                          @bind="coordinatorNote"
+                          placeholder="Add scheduling note, review instructions, or rejection reason..."></textarea>
+                @if (!string.IsNullOrEmpty(noteValidationError))
+                {
+                    <div class="invalid-feedback">@noteValidationError</div>
+                }
+            </div>
+
+            <div class="d-flex flex-wrap justify-content-end gap-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CloseReviewPanel">
+                    Cancel
+                </button>
+                <button type="button"
+                        class="btn btn-info btn-sm"
+                        @onclick="PromptRequestReview">
+                    <i class="bi bi-pencil-square me-1"></i>Request Review
+                </button>
+                <button type="button"
+                        class="btn btn-danger btn-sm"
+                        @onclick="PromptReject">
+                    <i class="bi bi-x-circle me-1"></i>Reject
+                </button>
+                <button type="button"
+                        class="btn btn-success btn-sm"
+                        disabled="@(!CanApproveSelected)"
+                        @onclick="PromptApprove">
+                    <i class="bi bi-check-circle me-1"></i>Approve &amp; Schedule
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (isLoading)
+{
+    <div class="d-flex align-items-center text-muted py-4">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+        <span>Loading makeup requests...</span>
+    </div>
+}
+else
+{
+    var filtered = FilteredRequests;
+    if (filtered.Count == 0)
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body text-center text-muted py-5">
+                <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                No makeup requests match the selected tab.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white fw-semibold">
+                Program Makeup Requests (@filtered.Count)
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Teacher</th>
+                                <th>Course &amp; Section</th>
+                                <th>Missed Lecture</th>
+                                <th>Reason</th>
+                                <th>Status</th>
+                                <th>Schedule / Remarks</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var req in filtered)
+                            {
+                                <tr class="@(selectedRequest?.Id == req.Id ? "table-primary" : "")">
+                                    <td class="fw-semibold">@req.TeacherName</td>
+                                    <td>
+                                        <span class="badge bg-primary me-1">@req.CourseCode</span>
+                                        <span class="fw-semibold">@req.CourseTitle</span>
+                                        <div class="text-muted small">
+                                            Section: @req.SectionName (@req.SectionStudentCount students)
+                                        </div>
+                                    </td>
+                                    <td class="small text-nowrap">
+                                        <div>@req.MissedDate.ToString("ddd, dd MMM yyyy")</div>
+                                        <div class="text-muted">@FormatSlotBlock(req.MissedSlotNumber, req.DurationHours)</div>
+                                    </td>
+                                    <td class="small" style="max-width: 240px;">@req.Reason</td>
+                                    <td>
+                                        <StatusBadge Status="req.Status" ApprovedDate="req.ApprovedDate" />
+                                    </td>
+                                    <td class="small" style="max-width: 260px;">
+                                        @if (req.ApprovedDate.HasValue && req.ApprovedSlotNumber.HasValue)
+                                        {
+                                            var approvedHours = req.ApprovedDurationHours ?? req.DurationHours;
+                                            <div class="fw-semibold @(req.Status == MakeupRequestStatus.NotHeld ? "text-muted text-decoration-line-through" : "text-success")">
+                                                @req.ApprovedDate.Value.ToString("ddd, dd MMM yyyy") &middot; @FormatTimeRange(req.ApprovedSlotNumber.Value, approvedHours)
+                                            </div>
+                                            @if (!string.IsNullOrEmpty(req.ApprovedRoomCode))
+                                            {
+                                                <div class="text-muted">Room: @req.ApprovedRoomCode</div>
+                                            }
+                                        }
+                                        @if (req.Status == MakeupRequestStatus.Held)
+                                        {
+                                            <div class="mt-1">
+                                                <span class="badge bg-primary-subtle text-primary border border-primary-subtle">
+                                                    Held (reported by teacher)
+                                                </span>
+                                                @if (req.HeldAt.HasValue)
+                                                {
+                                                    <span class="text-muted ms-1">@req.HeldAt.Value.ToLocalTime().ToString("dd MMM yyyy")</span>
+                                                }
+                                            </div>
+                                        }
+                                        else if (req.Status == MakeupRequestStatus.NotHeld)
+                                        {
+                                            <div class="mt-1">
+                                                <span class="badge bg-dark-subtle text-dark border">
+                                                    Not Held (reported by teacher)
+                                                </span>
+                                                @if (req.HeldAt.HasValue)
+                                                {
+                                                    <span class="text-muted ms-1">@req.HeldAt.Value.ToLocalTime().ToString("dd MMM yyyy")</span>
+                                                }
+                                            </div>
+                                        }
+                                        @if (!string.IsNullOrEmpty(req.CoordinatorRemarks))
+                                        {
+                                            <div class="text-muted fst-italic mt-1">@req.CoordinatorRemarks</div>
+                                        }
+                                        @if (!string.IsNullOrEmpty(req.HeldNote))
+                                        {
+                                            <div class="mt-1 @(req.Status == MakeupRequestStatus.NotHeld ? "text-danger" : "text-muted")">
+                                                <strong>Teacher Note:</strong> @req.HeldNote
+                                            </div>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (req.Status == MakeupRequestStatus.Pending)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-primary btn-sm text-nowrap"
+                                                    @onclick="() => OpenReviewAsync(req)">
+                                                <i class="bi bi-sliders me-1"></i>Review
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">Reviewed</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+<ConfirmDialog IsOpen="confirmOpen"
+               Title="@confirmTitle"
+               Message="@confirmMessage"
+               ConfirmText="@confirmButtonText"
+               ConfirmButtonClass="@confirmButtonClass"
+               IsBusy="isSubmittingDecision"
+               OnConfirm="ExecuteDecisionAsync"
+               OnCancel="() => confirmOpen = false" />
+
+@code {
+    private enum FilterTab
+    {
+        Pending,
+        ReviewRequested,
+        Approved,
+        HeldOutcome,
+        Rejected,
+        All
+    }
+
+    private enum PendingDecisionAction
+    {
+        Approve,
+        Reject,
+        RequestReview
+    }
+
+    private sealed class PreferredSlotOption
+    {
+        public DateTime Date { get; init; }
+        public int StartSlot { get; init; }
+        public int DurationHours { get; init; }
+        public List<Room> FreeRooms { get; init; } = new();
+        public bool IsAvailable { get; init; }
+        public string SelectedRoomId { get; set; } = string.Empty;
+        public string Key => $"{Date:yyyyMMdd}_{StartSlot}";
+    }
+
+    private bool isLoading = true;
+    private bool isLoadingPreferredOptions;
+    private bool isSubmittingDecision;
+    private string? programId;
+    private string? feedbackMessage;
+    private bool feedbackIsError;
+
+    private FilterTab activeTab = FilterTab.Pending;
+    private List<MakeupRequestView> allRequests = new();
+
+    private MakeupRequestView? selectedRequest;
+    private List<PreferredSlotOption> preferredOptions = new();
+    private string selectedOptionKey = string.Empty;
+    private string coordinatorNote = string.Empty;
+    private string? noteValidationError;
+
+    private bool confirmOpen;
+    private PendingDecisionAction confirmAction;
+    private string confirmTitle = string.Empty;
+    private string confirmMessage = string.Empty;
+    private string confirmButtonText = string.Empty;
+    private string confirmButtonClass = "btn-primary";
+
+    private bool CanApproveSelected
+    {
+        get
+        {
+            var opt = preferredOptions.FirstOrDefault(o => o.Key == selectedOptionKey);
+            return opt is not null && opt.IsAvailable && !string.IsNullOrEmpty(opt.SelectedRoomId);
+        }
+    }
+
+    private List<MakeupRequestView> FilteredRequests => activeTab switch
+    {
+        FilterTab.Pending => allRequests.Where(r => r.Status == MakeupRequestStatus.Pending).ToList(),
+        FilterTab.ReviewRequested => allRequests.Where(r => r.Status == MakeupRequestStatus.ReviewRequested).ToList(),
+        FilterTab.Approved => allRequests.Where(r => r.Status == MakeupRequestStatus.Approved).ToList(),
+        FilterTab.HeldOutcome => allRequests.Where(r => r.Status is MakeupRequestStatus.Held or MakeupRequestStatus.NotHeld).ToList(),
+        FilterTab.Rejected => allRequests.Where(r => r.Status == MakeupRequestStatus.Rejected).ToList(),
+        _ => allRequests
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        programId = await CurrentUser.GetProgramIdAsync();
+        await LoadRequestsAsync();
+    }
+
+    private async Task LoadRequestsAsync()
+    {
+        isLoading = true;
+        if (!string.IsNullOrEmpty(programId))
+        {
+            allRequests = await MakeupService.GetProgramRequestsAsync(programId);
+        }
+        isLoading = false;
+    }
+
+    private async Task OpenReviewAsync(MakeupRequestView req)
+    {
+        if (string.IsNullOrEmpty(programId))
+        {
+            return;
+        }
+
+        selectedRequest = req;
+        coordinatorNote = string.Empty;
+        noteValidationError = null;
+        feedbackMessage = null;
+        preferredOptions = new();
+        selectedOptionKey = string.Empty;
+        isLoadingPreferredOptions = true;
+
+        var hours = req.DurationHours > 0 ? req.DurationHours : 1;
+        var builtOptions = new List<PreferredSlotOption>();
+
+        foreach (var pref in req.PreferredSlots ?? Enumerable.Empty<PreferredSlot>())
+        {
+            var freeRooms = await AvailabilityService.GetFreeRoomsForBlockAsync(
+                programId,
+                req.CourseId,
+                req.SectionId,
+                pref.Date,
+                pref.StartSlot,
+                hours);
+
+            bool isAvailable = false;
+            if (freeRooms.Count > 0)
+            {
+                var (ok, _) = await AvailabilityService.CheckBlockAsync(
+                    programId,
+                    req.TeacherId,
+                    req.SectionId,
+                    freeRooms[0].Id,
+                    pref.Date,
+                    pref.StartSlot,
+                    hours,
+                    req.CourseId);
+                isAvailable = ok;
+            }
+
+            builtOptions.Add(new PreferredSlotOption
+            {
+                Date = pref.Date.Date,
+                StartSlot = pref.StartSlot,
+                DurationHours = hours,
+                FreeRooms = freeRooms,
+                IsAvailable = isAvailable,
+                SelectedRoomId = isAvailable ? freeRooms[0].Id : string.Empty
+            });
+        }
+
+        preferredOptions = builtOptions;
+        selectedOptionKey = preferredOptions.FirstOrDefault(o => o.IsAvailable)?.Key ?? string.Empty;
+        isLoadingPreferredOptions = false;
+    }
+
+    private void CloseReviewPanel()
+    {
+        selectedRequest = null;
+        preferredOptions = new();
+        selectedOptionKey = string.Empty;
+        coordinatorNote = string.Empty;
+        noteValidationError = null;
+    }
+
+    private void PromptApprove()
+    {
+        if (selectedRequest is null)
+        {
+            return;
+        }
+
+        var opt = preferredOptions.FirstOrDefault(o => o.Key == selectedOptionKey);
+        if (opt is null || !opt.IsAvailable || string.IsNullOrEmpty(opt.SelectedRoomId))
+        {
+            feedbackIsError = true;
+            feedbackMessage = "Please select an available preferred slot and room before approving.";
+            return;
+        }
+
+        var chosenRoom = opt.FreeRooms.FirstOrDefault(r => r.Id == opt.SelectedRoomId);
+        noteValidationError = null;
+        confirmAction = PendingDecisionAction.Approve;
+        confirmTitle = "Approve Makeup Request";
+        confirmButtonText = "Confirm Approval";
+        confirmButtonClass = "btn-success";
+        confirmMessage =
+            $"Approve makeup class for {selectedRequest.CourseCode} ({selectedRequest.SectionName}) " +
+            $"on {opt.Date:ddd, dd MMM yyyy} ({FormatSlotBlock(opt.StartSlot, opt.DurationHours)}) in Room {chosenRoom?.Code ?? "selected"}?";
+        confirmOpen = true;
+    }
+
+    private void PromptReject()
+    {
+        if (selectedRequest is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(coordinatorNote))
+        {
+            noteValidationError = "Please enter a note explaining the reason for rejecting this request.";
+            return;
+        }
+
+        noteValidationError = null;
+        confirmAction = PendingDecisionAction.Reject;
+        confirmTitle = "Reject Makeup Request";
+        confirmButtonText = "Confirm Rejection";
+        confirmButtonClass = "btn-danger";
+        confirmMessage =
+            $"Reject makeup request for {selectedRequest.CourseCode} ({selectedRequest.SectionName}) " +
+            $"from {selectedRequest.TeacherName} with note: \"{coordinatorNote.Trim()}\"?";
+        confirmOpen = true;
+    }
+
+    private void PromptRequestReview()
+    {
+        if (selectedRequest is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(coordinatorNote))
+        {
+            noteValidationError = "Please enter a note explaining what the teacher should revise.";
+            return;
+        }
+
+        noteValidationError = null;
+        confirmAction = PendingDecisionAction.RequestReview;
+        confirmTitle = "Request Review";
+        confirmButtonText = "Send Back for Review";
+        confirmButtonClass = "btn-info";
+        confirmMessage =
+            $"Send makeup request for {selectedRequest.CourseCode} ({selectedRequest.SectionName}) back to " +
+            $"{selectedRequest.TeacherName} for review with note: \"{coordinatorNote.Trim()}\"?";
+        confirmOpen = true;
+    }
+
+    private async Task ExecuteDecisionAsync()
+    {
+        if (string.IsNullOrEmpty(programId) || selectedRequest is null)
+        {
+            confirmOpen = false;
+            return;
+        }
+
+        isSubmittingDecision = true;
+        feedbackMessage = null;
+
+        if (confirmAction == PendingDecisionAction.Approve)
+        {
+            var opt = preferredOptions.FirstOrDefault(o => o.Key == selectedOptionKey);
+            if (opt is null || !opt.IsAvailable || string.IsNullOrEmpty(opt.SelectedRoomId))
+            {
+                isSubmittingDecision = false;
+                confirmOpen = false;
+                feedbackIsError = true;
+                feedbackMessage = "Selected slot or room is no longer valid.";
+                await OpenReviewAsync(selectedRequest);
+                return;
+            }
+
+            var chosenRoom = opt.FreeRooms.FirstOrDefault(r => r.Id == opt.SelectedRoomId);
+            var (succeeded, error) = await MakeupService.ApproveRequestAsync(
+                programId,
+                selectedRequest.Id,
+                opt.Date,
+                opt.StartSlot,
+                opt.SelectedRoomId,
+                coordinatorNote);
+
+            isSubmittingDecision = false;
+            confirmOpen = false;
+
+            if (!succeeded)
+            {
+                feedbackIsError = true;
+                feedbackMessage = error ?? "Could not approve makeup request.";
+                await OpenReviewAsync(selectedRequest);
+                return;
+            }
+
+            feedbackIsError = false;
+            feedbackMessage =
+                $"Approved {selectedRequest.CourseCode} ({selectedRequest.SectionName}) for {opt.Date:ddd, dd MMM yyyy} " +
+                $"{FormatSlotBlock(opt.StartSlot, opt.DurationHours)} in {chosenRoom?.Code ?? "selected room"}. Added to timetables.";
+            CloseReviewPanel();
+            await LoadRequestsAsync();
+        }
+        else if (confirmAction == PendingDecisionAction.Reject)
+        {
+            var (succeeded, error) = await MakeupService.RejectRequestAsync(
+                programId,
+                selectedRequest.Id,
+                coordinatorNote);
+
+            isSubmittingDecision = false;
+            confirmOpen = false;
+
+            if (!succeeded)
+            {
+                feedbackIsError = true;
+                feedbackMessage = error ?? "Could not reject makeup request.";
+                return;
+            }
+
+            feedbackIsError = false;
+            feedbackMessage = $"Rejected makeup request for {selectedRequest.CourseCode} ({selectedRequest.SectionName}).";
+            CloseReviewPanel();
+            await LoadRequestsAsync();
+        }
+        else
+        {
+            var (succeeded, error) = await MakeupService.RequestReviewAsync(
+                programId,
+                selectedRequest.Id,
+                coordinatorNote);
+
+            isSubmittingDecision = false;
+            confirmOpen = false;
+
+            if (!succeeded)
+            {
+                feedbackIsError = true;
+                feedbackMessage = error ?? "Could not send request back for review.";
+                return;
+            }
+
+            feedbackIsError = false;
+            feedbackMessage = $"Sent makeup request for {selectedRequest.CourseCode} ({selectedRequest.SectionName}) back to teacher for review.";
+            CloseReviewPanel();
+            await LoadRequestsAsync();
+        }
+    }
+
+    private static string FormatTimeRange(int startSlot, int durationHours)
+    {
+        var hours = Math.Max(1, durationHours);
+        var endSlot = startSlot + hours - 1;
+        var startDef = TimetableService.StandardSlots.FirstOrDefault(s => s.SlotNumber == startSlot);
+        var endDef = TimetableService.StandardSlots.FirstOrDefault(s => s.SlotNumber == endSlot);
+
+        return startDef is not null && endDef is not null
+            ? $"{startDef.StartTime}-{endDef.EndTime}"
+            : $"Slot {startSlot}";
+    }
+
+    private static string FormatSlotBlock(int startSlot, int durationHours)
+    {
+        var hours = Math.Max(1, durationHours);
+        var endSlot = startSlot + hours - 1;
+        var slotPart = hours == 1 ? $"Slot {startSlot}" : $"Slot {startSlot}-{endSlot}";
+        var timeRange = FormatTimeRange(startSlot, hours);
+        return $"{slotPart} ({timeRange})";
+    }
+}

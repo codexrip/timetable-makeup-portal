@@ -1,0 +1,1085 @@
+@page "/teacher/makeup-requests"
+@attribute [Authorize(Roles = "Teacher")]
+@inject CurrentUserService CurrentUser
+@inject TimetableService TimetableService
+@inject MakeupAvailabilityService AvailabilityService
+@inject MakeupService MakeupService
+
+<PageTitle>Makeup Requests (Teacher)</PageTitle>
+
+<div class="portal-page-header">
+    <h1 class="portal-page-title">Makeup Requests</h1>
+    <button type="button" class="btn @(isWizardOpen ? "btn-outline-secondary" : "btn-primary") btn-sm" @onclick="ToggleNewRequestWizardAsync">
+        <i class="bi @(isWizardOpen ? "bi-x-lg" : "bi-plus-lg") me-1"></i>
+        @(isWizardOpen ? "Close Form" : "New Request")
+    </button>
+</div>
+
+@if (!string.IsNullOrEmpty(feedbackMessage))
+{
+    <div class="alert @(feedbackIsError ? "alert-danger" : "alert-success") alert-dismissible fade show" role="alert">
+        @feedbackMessage
+        <button type="button" class="btn-close" @onclick="() => feedbackMessage = null" aria-label="Close"></button>
+    </div>
+}
+
+@* =========================================================================
+   1. REQUESTS LIST (top of page)
+   ========================================================================= *@
+@if (isLoading)
+{
+    <div class="d-flex align-items-center text-muted py-4">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+        <span>Loading makeup requests...</span>
+    </div>
+}
+else if (string.IsNullOrEmpty(teacherId))
+{
+    <div class="alert alert-warning">Your account is not linked to a teacher profile.</div>
+}
+else if (requests.Count == 0)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+            You have not submitted any makeup requests yet.
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            My Makeup Requests (@requests.Count)
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Missed Class</th>
+                            <th>Reason</th>
+                            <th>Preferred Slots</th>
+                            <th>Status</th>
+                            <th>Scheduled Makeup &amp; Remarks</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var req in requests)
+                        {
+                            var isEditingThis = editingRequest?.Id == req.Id && isWizardOpen;
+                            <tr class="@(isEditingThis ? "table-info" : "")">
+                                <td>
+                                    <span class="badge bg-primary me-1">@req.CourseCode</span>
+                                    <span class="fw-semibold">@req.CourseTitle</span>
+                                    <div class="text-muted small">Section: @req.SectionName</div>
+                                    <div class="small mt-1">
+                                        @req.MissedDate.ToString("ddd, dd MMM yyyy") &middot;
+                                        <span class="text-muted">@FormatSlotBlock(req.MissedSlotNumber, req.DurationHours)</span>
+                                    </div>
+                                </td>
+
+                                <td class="small" style="max-width: 230px;">
+                                    @req.Reason
+                                </td>
+
+                                <td class="small">
+                                    @if (req.PreferredSlots is { Count: > 0 })
+                                    {
+                                        <div class="d-flex flex-column gap-1">
+                                            @foreach (var p in req.PreferredSlots)
+                                            {
+                                                <span class="text-nowrap">
+                                                    <i class="bi bi-clock me-1 text-muted"></i>@p.Date.ToString("ddd dd MMM"): @FormatTimeRange(p.StartSlot, req.DurationHours)
+                                                </span>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">&mdash;</span>
+                                    }
+                                </td>
+
+                                <td>
+                                    <StatusBadge Status="req.Status" ApprovedDate="req.ApprovedDate" />
+                                </td>
+
+                                <td class="small" style="max-width: 260px;">
+                                    @if (req.ApprovedDate.HasValue && req.ApprovedSlotNumber.HasValue)
+                                    {
+                                        var approvedHours = req.ApprovedDurationHours ?? req.DurationHours;
+                                        <div class="fw-semibold text-success">
+                                            @req.ApprovedDate.Value.ToString("ddd, dd MMM yyyy")
+                                        </div>
+                                        <div>
+                                            @FormatTimeRange(req.ApprovedSlotNumber.Value, approvedHours)
+                                            @if (!string.IsNullOrEmpty(req.ApprovedRoomCode))
+                                            {
+                                                <span class="text-muted"> &middot; Room @req.ApprovedRoomCode</span>
+                                            }
+                                        </div>
+                                    }
+
+                                    @if ((req.Status == MakeupRequestStatus.Rejected || req.Status == MakeupRequestStatus.ReviewRequested)
+                                         && !string.IsNullOrWhiteSpace(req.CoordinatorRemarks))
+                                    {
+                                        <div class="mt-1 p-2 rounded border @(req.Status == MakeupRequestStatus.Rejected ? "border-danger-subtle bg-danger-subtle text-danger" : "border-info-subtle bg-info-subtle text-dark")">
+                                            <strong>Coordinator Note:</strong> @req.CoordinatorRemarks
+                                        </div>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(req.CoordinatorRemarks) && req.Status != MakeupRequestStatus.Pending)
+                                    {
+                                        <div class="text-muted fst-italic mt-1">@req.CoordinatorRemarks</div>
+                                    }
+                                    else if (req.Status == MakeupRequestStatus.Pending && !string.IsNullOrWhiteSpace(req.CoordinatorRemarks))
+                                    {
+                                        <div class="text-muted fst-italic mt-1">
+                                            Previous Coordinator Note: @req.CoordinatorRemarks
+                                        </div>
+                                    }
+                                    else if (req.Status == MakeupRequestStatus.Pending)
+                                    {
+                                        <span class="text-muted">Awaiting coordinator review</span>
+                                    }
+                                    @if (req.Status == MakeupRequestStatus.Held)
+                                    {
+                                        <div class="text-primary small mt-1">
+                                            <i class="bi bi-check2-all me-1"></i>Held @(req.HeldAt.HasValue ? $"on {req.HeldAt.Value.ToLocalTime():dd MMM yyyy}" : "")
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(req.HeldNote))
+                                        {
+                                            <div class="text-muted fst-italic">@req.HeldNote</div>
+                                        }
+                                    }
+                                    else if (req.Status == MakeupRequestStatus.NotHeld)
+                                    {
+                                        <div class="text-danger small mt-1">
+                                            <i class="bi bi-slash-circle me-1"></i>Not Held @(req.HeldAt.HasValue ? $"({req.HeldAt.Value.ToLocalTime():dd MMM yyyy})" : "")
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(req.HeldNote))
+                                        {
+                                            <div class="text-muted fst-italic">@req.HeldNote</div>
+                                        }
+                                    }
+                                </td>
+
+                                <td class="text-end text-nowrap">
+                                    @if (req.Status == MakeupRequestStatus.Pending)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-outline-danger btn-sm"
+                                                @onclick="() => PromptWithdraw(req)">
+                                            <i class="bi bi-x-circle me-1"></i>Withdraw
+                                        </button>
+                                    }
+                                    else if (req.Status == MakeupRequestStatus.ReviewRequested)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-info btn-sm"
+                                                @onclick="() => StartEditForReviewAsync(req)">
+                                            <i class="bi bi-pencil-square me-1"></i>Edit &amp; Resubmit
+                                        </button>
+                                    }
+                                    else if (req.Status == MakeupRequestStatus.Approved)
+                                    {
+                                        if (req.ApprovedDate.HasValue && req.ApprovedDate.Value.Date <= DateTime.Today)
+                                        {
+                                            <div class="d-inline-flex gap-1">
+                                                <button type="button"
+                                                        class="btn btn-success btn-sm"
+                                                        @onclick="() => OpenOutcomeModal(req, isHeld: true)">
+                                                    <i class="bi bi-check-lg me-1"></i>Mark as Held
+                                                </button>
+                                                <button type="button"
+                                                        class="btn btn-outline-danger btn-sm"
+                                                        @onclick="() => OpenOutcomeModal(req, isHeld: false)">
+                                                    <i class="bi bi-x-lg me-1"></i>Not Held
+                                                </button>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="d-inline-flex align-items-center gap-2">
+                                                <span class="text-success small fw-semibold">Scheduled</span>
+                                                <button type="button"
+                                                        class="btn btn-outline-danger btn-sm"
+                                                        @onclick="() => PromptWithdraw(req)">
+                                                    <i class="bi bi-x-circle me-1"></i>Withdraw
+                                                </button>
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">&mdash;</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+@* =========================================================================
+   2. NEW REQUEST / EDIT FOR REVIEW 3-STEP WIZARD
+   ========================================================================= *@
+@if (isWizardOpen)
+{
+    <div class="card border-primary shadow-sm mb-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">
+                <i class="bi @(editingRequest is null ? "bi-calendar-plus" : "bi-pencil-square") me-2"></i>
+                @(editingRequest is null
+                    ? "New Makeup Class Request"
+                    : $"Edit & Resubmit Request: {editingRequest.CourseCode} ({editingRequest.SectionName})")
+            </span>
+            <button type="button" class="btn-close btn-close-white" @onclick="CloseWizard" aria-label="Close"></button>
+        </div>
+        <div class="card-body">
+            @if (editingRequest is not null && !string.IsNullOrWhiteSpace(editingRequest.CoordinatorRemarks))
+            {
+                <div class="alert alert-info small mb-4">
+                    <i class="bi bi-chat-left-text me-1"></i>
+                    <strong>Coordinator Review Note:</strong> @editingRequest.CoordinatorRemarks
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(wizardError))
+            {
+                <div class="alert alert-danger small mb-4">@wizardError</div>
+            }
+
+            @* ----- STEP A: Course & Section + Missed Date + Missed Session ----- *@
+            <div class="card border mb-3">
+                <div class="card-header bg-light fw-semibold small">
+                    Step A: Select Missed Class
+                </div>
+                <div class="card-body">
+                    @if (editingRequest is not null)
+                    {
+                        <div class="row g-3 small">
+                            <div class="col-md-4">
+                                <span class="text-muted d-block">Course &amp; Section (Locked)</span>
+                                <strong>@editingRequest.CourseCode - @editingRequest.CourseTitle (@editingRequest.SectionName)</strong>
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-muted d-block">Missed Date (Locked)</span>
+                                <strong>@editingRequest.MissedDate.ToString("ddd, dd MMM yyyy")</strong>
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-muted d-block">Missed Session (Locked)</span>
+                                <strong>@FormatSlotBlock(editingRequest.MissedSlotNumber, editingRequest.DurationHours) &middot; @editingRequest.DurationHours h</strong>
+                            </div>
+                        </div>
+                    }
+                    else if (assignments.Count == 0)
+                    {
+                        <div class="alert alert-warning mb-0 small">
+                            You have no assigned courses to submit a makeup request for.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-5">
+                                <label for="wizardAssignment" class="form-label fw-semibold small">Course &amp; Section</label>
+                                <select id="wizardAssignment"
+                                        class="form-select form-select-sm"
+                                        @bind="selectedAssignmentId"
+                                        @bind:after="OnMissedSelectionChangedAsync">
+                                    <option value="">-- Select Course &amp; Section --</option>
+                                    @foreach (var a in assignments)
+                                    {
+                                        <option value="@a.AssignmentId">@a.CourseCode - @a.CourseTitle (@a.SectionName)</option>
+                                    }
+                                </select>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label for="wizardMissedDate" class="form-label fw-semibold small">Missed Date</label>
+                                <input id="wizardMissedDate"
+                                       type="date"
+                                       class="form-control form-control-sm"
+                                       min="@DateTime.Today.AddDays(-MakeupAvailabilityService.MaxMissedAgeDays).ToString("yyyy-MM-dd")"
+                                       max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                       @bind="selectedMissedDate"
+                                       @bind:after="OnMissedSelectionChangedAsync" />
+                            </div>
+
+                            <div class="col-md-4">
+                                <label for="wizardSession" class="form-label fw-semibold small">Scheduled Session</label>
+                                @if (string.IsNullOrEmpty(selectedAssignmentId) || !selectedMissedDate.HasValue)
+                                {
+                                    <div class="form-control form-control-sm bg-light text-muted">Choose course and date first</div>
+                                }
+                                else if (isLoadingMissedSessions)
+                                {
+                                    <div class="form-control form-control-sm bg-light text-muted">Checking timetable...</div>
+                                }
+                                else if (missedSessionOptions.Count == 0)
+                                {
+                                    <div class="text-danger small fw-semibold py-1">
+                                        You have no class for this course on that date.
+                                    </div>
+                                }
+                                else
+                                {
+                                    <select id="wizardSession"
+                                            class="form-select form-select-sm"
+                                            @bind="selectedMissedStartSlot"
+                                            @bind:after="OnMissedSessionChangedAsync">
+                                        @foreach (var opt in missedSessionOptions)
+                                        {
+                                            <option value="@opt.StartSlot">@opt.Label (@opt.DurationHours h)</option>
+                                        }
+                                    </select>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @* ----- STEP B: Reason ----- *@
+            <div class="card border mb-3">
+                <div class="card-header bg-light fw-semibold small">
+                    Step B: Reason for Missed Class
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="reasonCategory" class="form-label fw-semibold small">Reason Category</label>
+                            <select id="reasonCategory" class="form-select form-select-sm" @bind="reasonCategory">
+                                @foreach (var cat in ReasonCategories)
+                                {
+                                    <option value="@cat">@cat</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label for="reasonDetails" class="form-label fw-semibold small">
+                                Explanation <span class="text-danger">*</span>
+                            </label>
+                            <textarea id="reasonDetails"
+                                      class="form-control form-control-sm"
+                                      rows="2"
+                                      maxlength="450"
+                                      @bind="reasonDetails"
+                                      placeholder="Explain why the scheduled class was missed (minimum 5 characters)..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            @* ----- STEP C: Preferred Start Slots Grid (2 to 4 selections) ----- *@
+            <div class="card border mb-3">
+                <div class="card-header bg-light d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <span class="fw-semibold small">
+                        Step C: Select 2 to 4 Preferred Start Slots
+                        @if (activeDurationHours > 0)
+                        {
+                            <span class="text-muted fw-normal">(Duration: @activeDurationHours @(activeDurationHours == 1 ? "hour" : "hours"))</span>
+                        }
+                    </span>
+                    <span class="badge @(selectedPreferred.Count is >= 2 and <= 4 ? "bg-success" : "bg-warning text-dark")">
+                        Selected @selectedPreferred.Count of 4 (min 2)
+                    </span>
+                </div>
+                <div class="card-body">
+                    @if (!CanShowSlotGrid)
+                    {
+                        <div class="text-muted small py-2">
+                            Complete Step A by choosing a valid missed class session to view available makeup slots.
+                        </div>
+                    }
+                    else if (isLoadingFreeSlots)
+                    {
+                        <div class="d-flex align-items-center text-muted small py-3">
+                            <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+                            <span>Checking teacher, section, and suitable room availability...</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-wrap align-items-center gap-3 small mb-3">
+                            <span><span class="badge bg-success-subtle text-success border border-success-subtle">Green</span> Free start slot</span>
+                            <span><span class="badge bg-primary">Blue</span> Selected</span>
+                            <span><span class="badge bg-light text-muted border">Grey</span> Unavailable / Lunch (Slot 5)</span>
+                            <span class="text-muted ms-auto">Rooms are automatically assigned by the coordinator.</span>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(slotPickHint))
+                        {
+                            <div class="alert alert-warning py-1 px-2 small mb-2">@slotPickHint</div>
+                        }
+
+                        @if (freeStartOptions.Count == 0)
+                        {
+                            <div class="alert alert-warning small mb-0">
+                                No conflict-free @activeDurationHours-hour blocks with an adequate room are available in this week or next week.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-sm align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="min-width: 125px;">Date</th>
+                                            @foreach (var slot in TimetableService.StandardSlots)
+                                            {
+                                                <th class="text-center text-nowrap" style="min-width: 96px;">
+                                                    <div>Slot @slot.SlotNumber</div>
+                                                    <div class="text-muted fw-normal" style="font-size: 0.72rem;">@slot.Label</div>
+                                                </th>
+                                            }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var week in GetDisplayWeeks())
+                                        {
+                                            <tr class="table-secondary">
+                                                <td colspan="10" class="fw-semibold small py-1">@week.Title</td>
+                                            </tr>
+                                            @foreach (var date in week.Dates)
+                                            {
+                                                var isPastOrToday = date.Date <= DateTime.Today;
+                                                <tr>
+                                                    <td class="bg-light text-nowrap small">
+                                                        <div class="fw-semibold">@date.ToString("ddd, dd MMM")</div>
+                                                        @if (isPastOrToday)
+                                                        {
+                                                            <div class="text-muted" style="font-size: 0.72rem;">Unavailable</div>
+                                                        }
+                                                    </td>
+                                                    @foreach (var slot in TimetableService.StandardSlots)
+                                                    {
+                                                        var option = !isPastOrToday
+                                                            ? FindFreeOption(date, slot.SlotNumber)
+                                                            : null;
+                                                        <td class="p-1 text-center">
+                                                            @if (option is not null)
+                                                            {
+                                                                var chosen = IsSelected(option);
+                                                                <button type="button"
+                                                                        class="btn btn-sm w-100 @(chosen ? "btn-primary" : "btn-outline-success")"
+                                                                        title="@($"{date:ddd dd MMM} · {FormatTimeRange(option.StartSlot, option.Hours)} ({option.FreeRoomCount} suitable rooms free)")"
+                                                                        @onclick="() => TogglePreferredOption(option)">
+                                                                    @option.FreeRoomCount @(option.FreeRoomCount == 1 ? "room" : "rooms")
+                                                                </button>
+                                                            }
+                                                            else
+                                                            {
+                                                                <button type="button"
+                                                                        class="btn btn-sm btn-light text-muted w-100 border"
+                                                                        disabled>
+                                                                    @(slot.SlotNumber == MakeupAvailabilityService.LunchSlotNumber ? "Lunch" : "\u2014")
+                                                                </button>
+                                                            }
+                                                        </td>
+                                                    }
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div class="text-muted small">
+                    @if (!CanSubmitWizard && CanShowSlotGrid)
+                    {
+                        <span>Enter an explanation (5+ characters) and select 2&ndash;4 preferred slots to submit.</span>
+                    }
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CloseWizard">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            class="btn btn-primary btn-sm"
+                            disabled="@(isSubmitting || !CanSubmitWizard)"
+                            @onclick="SubmitWizardAsync">
+                        @if (isSubmitting)
+                        {
+                            <span>Submitting...</span>
+                        }
+                        else
+                        {
+                            <span>
+                                <i class="bi bi-send me-1"></i>
+                                @(editingRequest is null ? "Submit Request" : "Resubmit Request")
+                            </span>
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ConfirmDialog IsOpen="withdrawConfirmOpen"
+               Title="Withdraw Makeup Request"
+               Message="@withdrawConfirmMessage"
+               ConfirmText="Confirm Withdraw"
+               ConfirmButtonClass="btn-danger"
+               IsBusy="isWithdrawing"
+               OnConfirm="ExecuteWithdrawAsync"
+               OnCancel="() => withdrawConfirmOpen = false" />
+
+@if (outcomeModalOpen && outcomeTarget is not null)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow border-0">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-semibold">
+                        @(outcomeIsHeld ? "Mark Makeup Class as Held" : "Mark Makeup Class as Not Held")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseOutcomeModal" disabled="@isSubmittingOutcome" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="small mb-3 p-2 bg-light rounded border">
+                        <strong>@outcomeTarget.CourseCode - @outcomeTarget.CourseTitle</strong> (@outcomeTarget.SectionName)
+                        @if (outcomeTarget.ApprovedDate.HasValue && outcomeTarget.ApprovedSlotNumber.HasValue)
+                        {
+                            <div class="text-muted mt-1">
+                                Scheduled: @outcomeTarget.ApprovedDate.Value.ToString("ddd, dd MMM yyyy") &middot;
+                                @FormatTimeRange(outcomeTarget.ApprovedSlotNumber.Value, outcomeTarget.ApprovedDurationHours ?? outcomeTarget.DurationHours)
+                                @if (!string.IsNullOrEmpty(outcomeTarget.ApprovedRoomCode))
+                                {
+                                    <span> &middot; Room @outcomeTarget.ApprovedRoomCode</span>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    @if (!outcomeIsHeld)
+                    {
+                        <div class="alert alert-warning small py-2">
+                            Marking this class as <strong>Not Held</strong> will remove its scheduled slots from the timetable so they become free again.
+                        </div>
+                    }
+
+                    <label for="outcomeNote" class="form-label fw-semibold small">
+                        @(outcomeIsHeld ? "Session Note (optional)" : "Reason Not Held (required)")
+                    </label>
+                    <textarea id="outcomeNote"
+                              class="form-control form-control-sm @(string.IsNullOrEmpty(outcomeNoteError) ? "" : "is-invalid")"
+                              rows="3"
+                              maxlength="500"
+                              @bind="outcomeNote"
+                              placeholder="@(outcomeIsHeld ? "Optional remarks about the makeup class..." : "Explain why the makeup class could not be held...")"></textarea>
+                    @if (!string.IsNullOrEmpty(outcomeNoteError))
+                    {
+                        <div class="invalid-feedback">@outcomeNoteError</div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CloseOutcomeModal" disabled="@isSubmittingOutcome">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            class="btn btn-sm @(outcomeIsHeld ? "btn-success" : "btn-danger")"
+                            @onclick="SubmitOutcomeAsync"
+                            disabled="@isSubmittingOutcome">
+                        @(isSubmittingOutcome
+                            ? "Saving..."
+                            : (outcomeIsHeld ? "Confirm Held" : "Confirm Not Held"))
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] ReasonCategories =
+    {
+        "Illness",
+        "Official duty",
+        "Emergency",
+        "Other"
+    };
+
+    private bool isLoading = true;
+    private string? teacherId;
+    private string? programId;
+    private string? feedbackMessage;
+    private bool feedbackIsError;
+
+    private List<TeacherCourseView> assignments = new();
+    private List<MakeupRequestView> requests = new();
+
+    // Wizard state (shared by New Request and ReviewRequested Edit/Resubmit)
+    private bool isWizardOpen;
+    private MakeupRequestView? editingRequest;
+    private bool isLoadingMissedSessions;
+    private bool isLoadingFreeSlots;
+    private bool isSubmitting;
+    private string? wizardError;
+    private string? slotPickHint;
+
+    private string selectedAssignmentId = string.Empty;
+    private DateTime? selectedMissedDate = DateTime.Today;
+    private List<MissedSessionOption> missedSessionOptions = new();
+    private int selectedMissedStartSlot;
+    private int activeDurationHours;
+
+    private string reasonCategory = ReasonCategories[0];
+    private string reasonDetails = string.Empty;
+
+    private List<FreeStartOption> freeStartOptions = new();
+    private Dictionary<(DateTime Date, int Slot), FreeStartOption> freeOptionLookup = new();
+    private List<PreferredSlot> selectedPreferred = new();
+
+    // Withdraw confirmation modal state
+    private bool withdrawConfirmOpen;
+    private bool isWithdrawing;
+    private MakeupRequestView? requestToWithdraw;
+    private string withdrawConfirmMessage = string.Empty;
+
+    // Completion outcome modal state (Held / Not Held)
+    private bool outcomeModalOpen;
+    private bool outcomeIsHeld;
+    private bool isSubmittingOutcome;
+    private MakeupRequestView? outcomeTarget;
+    private string outcomeNote = string.Empty;
+    private string? outcomeNoteError;
+
+    private bool CanShowSlotGrid =>
+        editingRequest is not null || (missedSessionOptions.Count > 0 && selectedMissedStartSlot > 0 && activeDurationHours > 0);
+
+    private bool CanSubmitWizard =>
+        CanShowSlotGrid
+        && !string.IsNullOrWhiteSpace(reasonDetails)
+        && reasonDetails.Trim().Length >= 5
+        && selectedPreferred.Count is >= 2 and <= 4;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await CurrentUser.GetCurrentUserAsync();
+        teacherId = user.TeacherId;
+        programId = user.ProgramId;
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        isLoading = true;
+        if (!string.IsNullOrEmpty(teacherId))
+        {
+            assignments = await TimetableService.GetTeacherCoursesAsync(teacherId);
+            requests = await MakeupService.GetTeacherRequestsAsync(teacherId);
+        }
+        isLoading = false;
+    }
+
+    private async Task ToggleNewRequestWizardAsync()
+    {
+        if (isWizardOpen)
+        {
+            CloseWizard();
+            return;
+        }
+
+        editingRequest = null;
+        wizardError = null;
+        slotPickHint = null;
+        selectedAssignmentId = string.Empty;
+        selectedMissedDate = DateTime.Today;
+        missedSessionOptions = new();
+        selectedMissedStartSlot = 0;
+        activeDurationHours = 0;
+        reasonCategory = ReasonCategories[0];
+        reasonDetails = string.Empty;
+        freeStartOptions = new();
+        freeOptionLookup = new();
+        selectedPreferred = new();
+        isWizardOpen = true;
+        await Task.CompletedTask;
+    }
+
+    private async Task StartEditForReviewAsync(MakeupRequestView req)
+    {
+        editingRequest = req;
+        wizardError = null;
+        slotPickHint = null;
+        activeDurationHours = req.DurationHours;
+        ParseReason(req.Reason, out reasonCategory, out reasonDetails);
+        selectedPreferred = new();
+        isWizardOpen = true;
+
+        if (!string.IsNullOrEmpty(programId) && !string.IsNullOrEmpty(teacherId))
+        {
+            await LoadFreeStartOptionsAsync(req.SectionId, req.CourseId, req.DurationHours);
+
+            // Re-select any previously chosen slots that are still free
+            var droppedCount = 0;
+            foreach (var prev in req.PreferredSlots ?? Enumerable.Empty<PreferredSlot>())
+            {
+                if (freeOptionLookup.ContainsKey((prev.Date.Date, prev.StartSlot)) && selectedPreferred.Count < 4)
+                {
+                    selectedPreferred.Add(new PreferredSlot { Date = prev.Date.Date, StartSlot = prev.StartSlot });
+                }
+                else
+                {
+                    droppedCount++;
+                }
+            }
+
+            if (droppedCount > 0)
+            {
+                slotPickHint = $"{droppedCount} previously selected slot(s) are no longer available. Please ensure 2 to 4 free slots are selected.";
+            }
+        }
+    }
+
+    private void CloseWizard()
+    {
+        isWizardOpen = false;
+        editingRequest = null;
+        wizardError = null;
+        slotPickHint = null;
+    }
+
+    private async Task OnMissedSelectionChangedAsync()
+    {
+        wizardError = null;
+        slotPickHint = null;
+        missedSessionOptions = new();
+        selectedMissedStartSlot = 0;
+        activeDurationHours = 0;
+        freeStartOptions = new();
+        freeOptionLookup = new();
+        selectedPreferred = new();
+
+        if (string.IsNullOrEmpty(teacherId) || string.IsNullOrEmpty(selectedAssignmentId) || !selectedMissedDate.HasValue)
+        {
+            return;
+        }
+
+        isLoadingMissedSessions = true;
+        missedSessionOptions = await AvailabilityService.GetMissedSessionOptionsAsync(
+            teacherId,
+            selectedAssignmentId,
+            selectedMissedDate.Value);
+        isLoadingMissedSessions = false;
+
+        if (missedSessionOptions.Count > 0)
+        {
+            selectedMissedStartSlot = missedSessionOptions[0].StartSlot;
+            await OnMissedSessionChangedAsync();
+        }
+    }
+
+    private async Task OnMissedSessionChangedAsync()
+    {
+        slotPickHint = null;
+        selectedPreferred = new();
+        freeStartOptions = new();
+        freeOptionLookup = new();
+
+        var session = missedSessionOptions.FirstOrDefault(o => o.StartSlot == selectedMissedStartSlot);
+        var assignment = assignments.FirstOrDefault(a => a.AssignmentId == selectedAssignmentId);
+        if (session is null || assignment is null)
+        {
+            activeDurationHours = 0;
+            return;
+        }
+
+        activeDurationHours = session.DurationHours;
+        await LoadFreeStartOptionsAsync(assignment.SectionId, assignment.CourseId, session.DurationHours);
+    }
+
+    private async Task LoadFreeStartOptionsAsync(string sectionId, string courseId, int durationHours)
+    {
+        if (string.IsNullOrEmpty(programId) || string.IsNullOrEmpty(teacherId))
+        {
+            return;
+        }
+
+        isLoadingFreeSlots = true;
+        freeStartOptions = await AvailabilityService.GetFreeStartOptionsAsync(
+            programId,
+            teacherId,
+            sectionId,
+            courseId,
+            durationHours,
+            DateTime.Today);
+
+        freeOptionLookup = freeStartOptions.ToDictionary(o => (o.Date.Date, o.StartSlot));
+        isLoadingFreeSlots = false;
+    }
+
+    private FreeStartOption? FindFreeOption(DateTime date, int slotNumber) =>
+        freeOptionLookup.TryGetValue((date.Date, slotNumber), out var option) ? option : null;
+
+    private bool IsSelected(FreeStartOption option) =>
+        selectedPreferred.Any(p => p.Date.Date == option.Date.Date && p.StartSlot == option.StartSlot);
+
+    private void TogglePreferredOption(FreeStartOption option)
+    {
+        slotPickHint = null;
+        var existing = selectedPreferred.FirstOrDefault(
+            p => p.Date.Date == option.Date.Date && p.StartSlot == option.StartSlot);
+
+        if (existing is not null)
+        {
+            selectedPreferred.Remove(existing);
+            return;
+        }
+
+        if (selectedPreferred.Count >= 4)
+        {
+            slotPickHint = "Maximum 4 preferred slots can be selected. Click a blue slot to deselect it first.";
+            return;
+        }
+
+        selectedPreferred.Add(new PreferredSlot
+        {
+            Date = option.Date.Date,
+            StartSlot = option.StartSlot
+        });
+    }
+
+    private async Task SubmitWizardAsync()
+    {
+        if (string.IsNullOrEmpty(teacherId))
+        {
+            return;
+        }
+
+        wizardError = null;
+        var trimmedDetails = reasonDetails.Trim();
+        if (trimmedDetails.Length < 5)
+        {
+            wizardError = "Please enter an explanation of at least 5 characters.";
+            return;
+        }
+
+        if (selectedPreferred.Count is < 2 or > 4)
+        {
+            wizardError = "Please select between 2 and 4 preferred start slots from the grid.";
+            return;
+        }
+
+        var combinedReason = $"{reasonCategory}: {trimmedDetails}";
+
+        isSubmitting = true;
+        bool succeeded;
+        string? error;
+
+        if (editingRequest is not null)
+        {
+            (succeeded, error) = await MakeupService.ResubmitAsync(
+                teacherId,
+                editingRequest.Id,
+                combinedReason,
+                selectedPreferred);
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(selectedAssignmentId) || !selectedMissedDate.HasValue || selectedMissedStartSlot <= 0)
+            {
+                isSubmitting = false;
+                wizardError = "Please select a valid missed class session in Step A.";
+                return;
+            }
+
+            (succeeded, error) = await MakeupService.SubmitTeacherRequestAsync(
+                teacherId,
+                selectedAssignmentId,
+                selectedMissedDate.Value,
+                selectedMissedStartSlot,
+                combinedReason,
+                selectedPreferred);
+        }
+
+        isSubmitting = false;
+
+        if (!succeeded)
+        {
+            wizardError = error ?? "Could not save makeup request.";
+            return;
+        }
+
+        feedbackIsError = false;
+        feedbackMessage = editingRequest is null
+            ? "Makeup class request submitted successfully."
+            : "Makeup request updated and resubmitted for coordinator approval.";
+
+        CloseWizard();
+        await LoadDataAsync();
+    }
+
+    private void PromptWithdraw(MakeupRequestView req)
+    {
+        requestToWithdraw = req;
+        withdrawConfirmMessage = req.Status == MakeupRequestStatus.Approved
+            ? $"Withdraw your scheduled makeup class for {req.CourseCode} ({req.SectionName}) on {req.ApprovedDate:ddd, dd MMM yyyy}? This will release the reserved timetable slots."
+            : $"Withdraw your pending makeup request for {req.CourseCode} ({req.SectionName}) missed on {req.MissedDate:ddd, dd MMM yyyy}?";
+        withdrawConfirmOpen = true;
+    }
+
+    private async Task ExecuteWithdrawAsync()
+    {
+        if (string.IsNullOrEmpty(teacherId) || requestToWithdraw is null)
+        {
+            withdrawConfirmOpen = false;
+            return;
+        }
+
+        isWithdrawing = true;
+        var (succeeded, error) = requestToWithdraw.Status == MakeupRequestStatus.Approved
+            ? await MakeupService.WithdrawApprovedAsync(teacherId, requestToWithdraw.Id)
+            : await MakeupService.WithdrawAsync(teacherId, requestToWithdraw.Id);
+        isWithdrawing = false;
+        withdrawConfirmOpen = false;
+
+        if (!succeeded)
+        {
+            feedbackIsError = true;
+            feedbackMessage = error ?? "Could not withdraw request.";
+            return;
+        }
+
+        if (editingRequest?.Id == requestToWithdraw.Id)
+        {
+            CloseWizard();
+        }
+
+        feedbackIsError = false;
+        feedbackMessage = $"Withdrew makeup request for {requestToWithdraw.CourseCode} ({requestToWithdraw.SectionName}).";
+        requestToWithdraw = null;
+        await LoadDataAsync();
+    }
+
+    private void OpenOutcomeModal(MakeupRequestView req, bool isHeld)
+    {
+        outcomeTarget = req;
+        outcomeIsHeld = isHeld;
+        outcomeNote = string.Empty;
+        outcomeNoteError = null;
+        outcomeModalOpen = true;
+    }
+
+    private void CloseOutcomeModal()
+    {
+        outcomeModalOpen = false;
+        outcomeTarget = null;
+        outcomeNote = string.Empty;
+        outcomeNoteError = null;
+    }
+
+    private async Task SubmitOutcomeAsync()
+    {
+        if (string.IsNullOrEmpty(teacherId) || outcomeTarget is null)
+        {
+            CloseOutcomeModal();
+            return;
+        }
+
+        if (!outcomeIsHeld && string.IsNullOrWhiteSpace(outcomeNote))
+        {
+            outcomeNoteError = "Please enter a note explaining why the makeup class was not held.";
+            return;
+        }
+
+        outcomeNoteError = null;
+        isSubmittingOutcome = true;
+
+        var (succeeded, error) = outcomeIsHeld
+            ? await MakeupService.MarkHeldAsync(teacherId, outcomeTarget.Id, outcomeNote)
+            : await MakeupService.MarkNotHeldAsync(teacherId, outcomeTarget.Id, outcomeNote);
+
+        isSubmittingOutcome = false;
+
+        if (!succeeded)
+        {
+            outcomeNoteError = error ?? "Could not record makeup outcome.";
+            return;
+        }
+
+        feedbackIsError = false;
+        feedbackMessage = outcomeIsHeld
+            ? $"Marked {outcomeTarget.CourseCode} ({outcomeTarget.SectionName}) makeup class as Held."
+            : $"Marked {outcomeTarget.CourseCode} ({outcomeTarget.SectionName}) makeup class as Not Held and freed its timetable slots.";
+
+        CloseOutcomeModal();
+        await LoadDataAsync();
+    }
+
+    private static List<(string Title, List<DateTime> Dates)> GetDisplayWeeks()
+    {
+        var today = DateTime.Today;
+        var (thisMonday, _) = TimetableService.GetWeekRange(today);
+        var nextMonday = thisMonday.AddDays(7);
+
+        var weeks = new List<(string Title, List<DateTime> Dates)>();
+
+        var thisWeekDates = Enumerable.Range(0, 5)
+            .Select(i => thisMonday.AddDays(i))
+            .ToList();
+
+        if (thisWeekDates.Any(d => d.Date > today))
+        {
+            weeks.Add(($"This Week ({thisMonday:dd MMM} - {thisMonday.AddDays(4):dd MMM})", thisWeekDates));
+        }
+
+        var nextWeekDates = Enumerable.Range(0, 5)
+            .Select(i => nextMonday.AddDays(i))
+            .ToList();
+
+        weeks.Add(($"Next Week ({nextMonday:dd MMM} - {nextMonday.AddDays(4):dd MMM})", nextWeekDates));
+        return weeks;
+    }
+
+    private static void ParseReason(string fullReason, out string category, out string details)
+    {
+        foreach (var cat in ReasonCategories)
+        {
+            var prefix = $"{cat}: ";
+            if (fullReason.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                category = cat;
+                details = fullReason[prefix.Length..].Trim();
+                return;
+            }
+        }
+
+        category = "Other";
+        details = fullReason;
+    }
+
+    private static string FormatTimeRange(int startSlot, int durationHours)
+    {
+        var hours = Math.Max(1, durationHours);
+        var endSlot = startSlot + hours - 1;
+        var startDef = TimetableService.StandardSlots.FirstOrDefault(s => s.SlotNumber == startSlot);
+        var endDef = TimetableService.StandardSlots.FirstOrDefault(s => s.SlotNumber == endSlot);
+
+        return startDef is not null && endDef is not null
+            ? $"{startDef.StartTime}-{endDef.EndTime}"
+            : $"Slot {startSlot}";
+    }
+
+    private static string FormatSlotBlock(int startSlot, int durationHours)
+    {
+        var hours = Math.Max(1, durationHours);
+        var endSlot = startSlot + hours - 1;
+        var slotPart = hours == 1 ? $"Slot {startSlot}" : $"Slot {startSlot}-{endSlot}";
+        var timeRange = FormatTimeRange(startSlot, hours);
+        return $"{slotPart} ({timeRange})";
+    }
+}

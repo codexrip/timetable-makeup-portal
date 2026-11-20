@@ -1,0 +1,140 @@
+@page "/coordinator/room-timetables"
+@attribute [Authorize(Roles = "Coordinator")]
+@inject CurrentUserService CurrentUser
+@inject TimetableService TimetableService
+
+<PageTitle>Room Timetables</PageTitle>
+
+<div class="portal-page-header">
+    <div>
+        <h1 class="portal-page-title">Room Timetables</h1>
+        <p class="text-muted small mb-0">Week of <strong>@WeekRangeLabel</strong></p>
+    </div>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Week Navigation">
+        <button type="button" class="btn btn-outline-secondary" @onclick="() => ShiftWeekAsync(-7)">
+            <i class="bi bi-chevron-left"></i> Prev
+        </button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="GoToCurrentWeekAsync">
+            This Week
+        </button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="() => ShiftWeekAsync(7)">
+            Next <i class="bi bi-chevron-right"></i>
+        </button>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <div class="d-flex align-items-center text-muted py-4">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+        <span>Loading rooms...</span>
+    </div>
+}
+else if (rooms.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-muted py-5">
+            No rooms or labs found in your program.
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row align-items-end g-3">
+                <div class="col-md-5">
+                    <label for="roomSelect" class="form-label fw-semibold small">Select Room / Lab</label>
+                    <select id="roomSelect"
+                            class="form-select"
+                            @bind="selectedRoomId"
+                            @bind:after="LoadTimetableAsync">
+                        @foreach (var r in rooms)
+                        {
+                            <option value="@r.Id">@r.Code - @r.Name (@(r.IsLab ? "Lab" : "Classroom"), Cap: @r.Capacity)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-7 text-muted small">
+                    Regular bookings repeat weekly; approved makeup classes appear only in the week of their scheduled date.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoadingGrid)
+    {
+        <div class="d-flex align-items-center text-muted py-3">
+            <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+            <span>Loading timetable...</span>
+        </div>
+    }
+    else
+    {
+        <TimetableGrid Entries="entries"
+                       ShowTeacher="true"
+                       ShowSection="true"
+                       HighlightFreeSlots="true" />
+    }
+}
+
+@code {
+    private bool isLoading = true;
+    private bool isLoadingGrid;
+    private string? programId;
+    private string selectedRoomId = string.Empty;
+    private DateTime weekReferenceDate = DateTime.Today;
+    private List<Room> rooms = new();
+    private List<TimetableSlotView> entries = new();
+
+    private string WeekRangeLabel
+    {
+        get
+        {
+            var (start, _) = TimetableService.GetWeekRange(weekReferenceDate);
+            var friday = start.AddDays(4);
+            return $"{start:dd MMM} - {friday:dd MMM yyyy}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        programId = await CurrentUser.GetProgramIdAsync();
+        if (!string.IsNullOrEmpty(programId))
+        {
+            rooms = await TimetableService.GetProgramRoomsAsync(programId);
+            if (rooms.Count > 0)
+            {
+                selectedRoomId = rooms[0].Id;
+                await LoadTimetableAsync();
+            }
+        }
+
+        isLoading = false;
+    }
+
+    private async Task LoadTimetableAsync()
+    {
+        if (string.IsNullOrEmpty(programId) || string.IsNullOrEmpty(selectedRoomId))
+        {
+            entries = new();
+            return;
+        }
+
+        isLoadingGrid = true;
+        entries = await TimetableService.GetProgramRoomTimetableAsync(programId, selectedRoomId, weekReferenceDate);
+        isLoadingGrid = false;
+    }
+
+    private async Task ShiftWeekAsync(int days)
+    {
+        weekReferenceDate = weekReferenceDate.AddDays(days);
+        await LoadTimetableAsync();
+    }
+
+    private async Task GoToCurrentWeekAsync()
+    {
+        weekReferenceDate = DateTime.Today;
+        await LoadTimetableAsync();
+    }
+}

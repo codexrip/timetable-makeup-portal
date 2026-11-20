@@ -1,0 +1,95 @@
+@page "/teacher/my-courses"
+@attribute [Authorize(Roles = "Teacher")]
+@inject CurrentUserService CurrentUser
+@inject TimetableService TimetableService
+
+<PageTitle>My Courses</PageTitle>
+
+<div class="portal-page-header">
+    <h1 class="portal-page-title">My Courses</h1>
+    <a href="/teacher/my-timetable" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-calendar-week me-1"></i>View Timetable
+    </a>
+</div>
+
+@if (isLoading)
+{
+    <div class="d-flex align-items-center text-muted py-4">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+        <span>Loading assigned courses...</span>
+    </div>
+}
+else if (courses.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-muted py-5">
+            No courses are currently assigned to your profile.
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white fw-semibold">
+            Assigned Courses &amp; Sections (@courses.Count)
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Code</th>
+                            <th>Course Title</th>
+                            <th>Section</th>
+                            <th class="text-center">Credits</th>
+                            <th class="text-center">Type</th>
+                            <th>Semester</th>
+                            <th class="text-center">Weekly Slots</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in courses)
+                        {
+                            <tr>
+                                <td><span class="badge bg-primary">@c.CourseCode</span></td>
+                                <td class="fw-semibold">@c.CourseTitle</td>
+                                <td>@c.SectionName</td>
+                                <td class="text-center">@c.CreditHours</td>
+                                <td class="text-center">
+                                    @if (c.RequiresLab)
+                                    {
+                                        <span class="badge bg-info-subtle text-info-emphasis">Lab + Theory</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary-subtle text-secondary-emphasis">Theory</span>
+                                    }
+                                </td>
+                                <td>@c.SemesterTerm</td>
+                                <td class="text-center">
+                                    <span class="badge bg-light text-dark border">@c.WeeklyLectures</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+    private List<TeacherCourseView> courses = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var teacherId = await CurrentUser.GetTeacherIdAsync();
+        if (!string.IsNullOrEmpty(teacherId))
+        {
+            courses = await TimetableService.GetTeacherCoursesAsync(teacherId);
+        }
+
+        isLoading = false;
+    }
+}

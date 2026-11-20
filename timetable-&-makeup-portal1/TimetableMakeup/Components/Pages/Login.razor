@@ -1,0 +1,117 @@
+@page "/login"
+@layout LoginLayout
+@attribute [AllowAnonymous]
+
+@using System.ComponentModel.DataAnnotations
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Login - Timetable &amp; Makeup Portal</PageTitle>
+
+<div class="text-center mb-4">
+    <h1 class="h4 fw-bold text-primary mb-1">Sign In</h1>
+    <p class="text-muted small mb-0">Enter your university portal credentials</p>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger py-2 small" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>@errorMessage
+    </div>
+}
+
+<EditForm Model="Input" method="post" OnValidSubmit="HandleLoginAsync" FormName="LoginForm" Enhance="false">
+    <DataAnnotationsValidator />
+
+    <div class="mb-3">
+        <label for="email" class="form-label fw-semibold small">Email Address</label>
+        <InputText id="email"
+                   @bind-Value="Input.Email"
+                   class="form-control"
+                   placeholder="name@demo.edu"
+                   autocomplete="username" />
+        <ValidationMessage For="() => Input.Email" class="text-danger small mt-1" />
+    </div>
+
+    <div class="mb-3">
+        <label for="password" class="form-label fw-semibold small">Password</label>
+        <InputText id="password"
+                   @bind-Value="Input.Password"
+                   type="password"
+                   class="form-control"
+                   placeholder="Enter password"
+                   autocomplete="current-password" />
+        <ValidationMessage For="() => Input.Password" class="text-danger small mt-1" />
+    </div>
+
+    <button type="submit" class="btn btn-primary w-100 fw-semibold">
+        <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
+    </button>
+</EditForm>
+
+<div class="mt-4 pt-3 border-top small text-muted">
+    <div class="fw-semibold mb-1">Demo Accounts:</div>
+    <div>Coordinator: <code>coordinator@demo.edu</code> / <code>Coord@123</code></div>
+    <div>Teacher (Ms. Faryal): <code>teacher@demo.edu</code> / <code>Teach@123</code></div>
+    <div>Faculty login: <code>firstname.lastname@demo.edu</code> / <code>Teach@123</code></div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private LoginInput Input { get; set; } = new();
+
+    private string? errorMessage;
+
+    protected override void OnInitialized()
+    {
+        Input ??= new LoginInput();
+
+        if (HttpContext.User.Identity?.IsAuthenticated == true)
+        {
+            var role = HttpContext.User.FindFirstValue(ClaimTypes.Role);
+            Navigation.NavigateTo(GetRedirectUrl(role), forceLoad: true);
+        }
+    }
+
+    private async Task HandleLoginAsync()
+    {
+        var result = await AuthService.AuthenticateAsync(Input.Email, Input.Password);
+        if (!result.Succeeded || result.User is null)
+        {
+            errorMessage = result.ErrorMessage ?? "Invalid login attempt.";
+            return;
+        }
+
+        var principal = AuthService.CreatePrincipal(result.User);
+        await HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            principal,
+            new AuthenticationProperties { IsPersistent = true });
+
+        var targetUrl = GetRedirectUrl(result.User.Role.ToString());
+        Navigation.NavigateTo(targetUrl, forceLoad: true);
+    }
+
+    private static string GetRedirectUrl(string? role) => role switch
+    {
+        nameof(Role.Coordinator) => "/coordinator/dashboard",
+        nameof(Role.Teacher) => "/teacher/dashboard",
+        _ => "/"
+    };
+
+    private sealed class LoginInput
+    {
+        [Required(ErrorMessage = "Email is required.")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Password is required.")]
+        public string Password { get; set; } = string.Empty;
+    }
+}

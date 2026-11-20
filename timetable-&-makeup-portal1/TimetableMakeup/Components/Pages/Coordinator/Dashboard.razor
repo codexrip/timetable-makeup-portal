@@ -1,0 +1,266 @@
+@page "/coordinator/dashboard"
+@attribute [Authorize(Roles = "Coordinator")]
+@inject CurrentUserService CurrentUser
+@inject TimetableService TimetableService
+
+<PageTitle>Coordinator Dashboard</PageTitle>
+
+<div class="portal-page-header">
+    <div>
+        <h1 class="portal-page-title">Coordinator Dashboard</h1>
+        @if (!string.IsNullOrWhiteSpace(data.ProgramCode))
+        {
+            <p class="text-muted small mb-0">
+                Program: <span class="badge bg-primary me-1">@data.ProgramCode</span> @data.ProgramName
+            </p>
+        }
+    </div>
+    <a href="/coordinator/makeup-requests" class="btn btn-primary btn-sm">
+        <i class="bi bi-calendar-check me-1"></i>Review Makeup Requests
+    </a>
+</div>
+
+@if (isLoading)
+{
+    <div class="d-flex align-items-center text-muted py-4">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span>
+        <span>Loading program overview...</span>
+    </div>
+}
+else if (string.IsNullOrEmpty(programId))
+{
+    <div class="alert alert-warning">Your account is not assigned to an academic program.</div>
+}
+else
+{
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
+        <div class="col">
+            <StatCard Title="Teachers"
+                      Value="@data.TeachersCount.ToString()"
+                      Icon="bi-people"
+                      Color="primary"
+                      Subtitle="Faculty in program" />
+        </div>
+        <div class="col">
+            <StatCard Title="Sections"
+                      Value="@data.SectionsCount.ToString()"
+                      Icon="bi-grid-3x3-gap"
+                      Color="info"
+                      Subtitle="Active class sections" />
+        </div>
+        <div class="col">
+            <StatCard Title="Total Students"
+                      Value="@data.TotalStudentsCount.ToString()"
+                      Icon="bi-mortarboard"
+                      Color="primary"
+                      Subtitle="Sum across sections" />
+        </div>
+        <div class="col">
+            <StatCard Title="Courses"
+                      Value="@data.CoursesCount.ToString()"
+                      Icon="bi-book"
+                      Color="info"
+                      Subtitle="Offered in program" />
+        </div>
+        <div class="col">
+            <StatCard Title="Weekly Regular Classes"
+                      Value="@data.WeeklyRegularClassesCount.ToString()"
+                      Icon="bi-calendar-week"
+                      Color="primary"
+                      Subtitle="Hourly timetable slots" />
+        </div>
+        <div class="col">
+            <StatCard Title="Makeups This Week"
+                      Value="@data.MakeupsThisWeekCount.ToString()"
+                      Icon="bi-calendar-plus"
+                      Color="success"
+                      Subtitle="Scheduled / held this week" />
+        </div>
+        <div class="col">
+            <StatCard Title="Pending Requests"
+                      Value="@data.PendingRequestsCount.ToString()"
+                      Icon="bi-hourglass-split"
+                      Color="warning"
+                      Subtitle="Awaiting decision" />
+        </div>
+        <div class="col">
+            <StatCard Title="Waiting &gt; 2 Days"
+                      Value="@data.WaitingOverTwoDaysCount.ToString()"
+                      Icon="bi-exclamation-triangle"
+                      Color="danger"
+                      Highlight="@(data.WaitingOverTwoDaysCount > 0)"
+                      Subtitle="Pending over 48 hours"
+                      LinkHref="/coordinator/makeup-requests"
+                      LinkText="Review pending" />
+        </div>
+    </div>
+
+    @* Upcoming makeup classes (next 7 days) *@
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">
+                <i class="bi bi-calendar2-event me-2 text-primary"></i>Upcoming Makeup Classes (Next 7 Days)
+            </span>
+            <a href="/coordinator/makeup-requests" class="btn btn-outline-primary btn-sm">All Requests</a>
+        </div>
+        <div class="card-body p-0">
+            @if (data.UpcomingMakeups.Count == 0)
+            {
+                <div class="p-4 text-center text-muted small">
+                    No makeup classes scheduled in the next 7 days.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Date</th>
+                                <th>Time Range</th>
+                                <th>Course</th>
+                                <th>Section</th>
+                                <th>Teacher</th>
+                                <th>Room</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var m in data.UpcomingMakeups)
+                            {
+                                <tr>
+                                    <td class="text-nowrap fw-semibold small">@m.Date.ToString("ddd, dd MMM yyyy")</td>
+                                    <td class="text-nowrap small">@m.TimeRange</td>
+                                    <td>
+                                        <span class="badge bg-primary me-1">@m.CourseCode</span>
+                                        @m.CourseTitle
+                                    </td>
+                                    <td>@m.SectionName</td>
+                                    <td>@m.TeacherName</td>
+                                    <td><i class="bi bi-geo-alt me-1 text-muted"></i>@m.RoomCode</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="row g-4">
+        @* Teacher workload table *@
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white fw-semibold">
+                    <i class="bi bi-person-lines-fill me-2 text-primary"></i>Teacher Workload
+                </div>
+                <div class="card-body p-0">
+                    @if (data.TeacherWorkloads.Count == 0)
+                    {
+                        <div class="p-4 text-center text-muted small">No faculty members found.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height: 380px;">
+                            <table class="table table-hover table-sm align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Teacher</th>
+                                        <th class="text-center">Weekly Hours</th>
+                                        <th class="text-center">Makeup Requests</th>
+                                        <th class="text-center">Held vs Not Held</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var w in data.TeacherWorkloads)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <div class="fw-semibold small">@w.TeacherName</div>
+                                                <div class="text-muted" style="font-size: 0.75rem;">@w.EmployeeCode</div>
+                                            </td>
+                                            <td class="text-center fw-semibold">@w.WeeklyTeachingHours</td>
+                                            <td class="text-center">@w.MakeupRequestsCount</td>
+                                            <td class="text-center text-nowrap">
+                                                <span class="badge bg-primary-subtle text-primary me-1">@w.HeldCount Held</span>
+                                                <span class="badge bg-dark-subtle text-dark">@w.NotHeldCount Not Held</span>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        @* Makeups by course table *@
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white fw-semibold">
+                    <i class="bi bi-journal-check me-2 text-primary"></i>Makeups by Course
+                </div>
+                <div class="card-body p-0">
+                    @if (data.MakeupsByCourse.Count == 0)
+                    {
+                        <div class="p-4 text-center text-muted small">
+                            No makeup requests recorded for any course yet.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height: 380px;">
+                            <table class="table table-hover table-sm align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Course</th>
+                                        <th class="text-center">Requests</th>
+                                        <th class="text-center">Held</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var c in data.MakeupsByCourse)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <span class="badge bg-primary me-1">@c.CourseCode</span>
+                                                <span class="small fw-semibold">@c.CourseTitle</span>
+                                            </td>
+                                            <td class="text-center fw-semibold">@c.RequestsCount</td>
+                                            <td class="text-center">
+                                                <span class="badge bg-success-subtle text-success">@c.HeldCount</span>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+    private string? programId;
+    private CoordinatorDashboardData data = new(
+        string.Empty,
+        string.Empty,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        new List<UpcomingMakeupView>(),
+        new List<TeacherWorkloadRow>(),
+        new List<CourseMakeupRow>());
+
+    protected override async Task OnInitializedAsync()
+    {
+        programId = await CurrentUser.GetProgramIdAsync();
+        if (!string.IsNullOrEmpty(programId))
+        {
+            data = await TimetableService.GetCoordinatorDashboardDataAsync(programId, DateTime.Today);
+        }
+
+        isLoading = false;
+    }
+}

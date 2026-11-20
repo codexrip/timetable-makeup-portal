@@ -1,0 +1,83 @@
+@inherits LayoutComponentBase
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject CurrentUserService CurrentUser
+
+<div class="portal-wrapper @(isCollapsed ? "sidebar-collapsed" : "") @(isMobileOpen ? "sidebar-mobile-open" : "")">
+    <TopBar OnToggleSidebar="ToggleSidebar"
+            UserName="@currentUser.FullName"
+            UserRole="@(currentUser.Role?.ToString() ?? string.Empty)" />
+
+    <div class="portal-body">
+        <Sidebar UserRole="@(currentUser.Role?.ToString() ?? string.Empty)"
+                 OnNavigate="CloseMobileOnNavigate" />
+
+        @* Mobile backdrop overlay to dismiss off-canvas sidebar *@
+        <div class="sidebar-backdrop" @onclick="CloseMobileSidebar"></div>
+
+        <div class="portal-main">
+            <main class="portal-content">
+                @Body
+            </main>
+
+            <footer class="portal-footer">
+                Copyright &copy; 2026 | All Rights Reserved
+            </footer>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool isCollapsed;
+    private bool isMobileOpen;
+    private CurrentUserInfo currentUser = new(false, string.Empty, string.Empty, null, null, null);
+    private DotNetObjectReference<MainLayout>? objRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        currentUser = await CurrentUser.GetCurrentUserAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            objRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("portalSidebar.registerResizeListener", objRef);
+        }
+    }
+
+    private async Task ToggleSidebar()
+    {
+        var isMobile = await JS.InvokeAsync<bool>("portalSidebar.isMobileView");
+        if (isMobile)
+        {
+            isMobileOpen = !isMobileOpen;
+        }
+        else
+        {
+            isCollapsed = !isCollapsed;
+        }
+    }
+
+    private void CloseMobileOnNavigate()
+    {
+        isMobileOpen = false;
+    }
+
+    [JSInvokable]
+    public void CloseMobileSidebar()
+    {
+        if (isMobileOpen)
+        {
+            isMobileOpen = false;
+            StateHasChanged();
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        objRef?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

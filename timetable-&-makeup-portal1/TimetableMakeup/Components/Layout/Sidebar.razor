@@ -1,0 +1,131 @@
+@* Collapsible role-based sidebar driven by the authenticated user's Role claim *@
+@implements IDisposable
+@inject CurrentUserService CurrentUser
+@inject IServiceScopeFactory ScopeFactory
+@inject NavigationManager Navigation
+
+<aside class="portal-sidebar" aria-label="Sidebar Navigation">
+    <div class="d-flex align-items-center justify-content-between mb-1">
+        @if (!string.IsNullOrWhiteSpace(UserRole))
+        {
+            <div class="sidebar-role-header mb-0">
+                @UserRole Portal
+            </div>
+        }
+        <button type="button"
+                class="btn btn-sm btn-light d-lg-none ms-auto"
+                @onclick="OnNavigate"
+                aria-label="Close Sidebar">
+            <i class="bi bi-x-lg"></i>
+        </button>
+    </div>
+
+    <nav class="sidebar-nav">
+        @foreach (var item in GetMenuItems())
+        {
+            <NavLink href="@item.Href"
+                     class="sidebar-card-link"
+                     Match="NavLinkMatch.All"
+                     title="@item.Label"
+                     @onclick="OnNavigate">
+                <i class="bi @item.Icon"></i>
+                <span class="sidebar-label d-flex align-items-center justify-content-between flex-grow-1 gap-2">
+                    <span>@item.Label</span>
+                    @if (item.ShowMakeupBadge && makeupBadgeCount > 0)
+                    {
+                        <span class="badge rounded-pill @(UserRole == nameof(Role.Coordinator) ? "bg-warning text-dark" : "bg-info text-dark")">
+                            @makeupBadgeCount
+                        </span>
+                    }
+                </span>
+            </NavLink>
+        }
+    </nav>
+</aside>
+
+@code {
+    [Parameter]
+    public string UserRole { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback OnNavigate { get; set; }
+
+    private int makeupBadgeCount;
+    private string lastRoleLoaded = string.Empty;
+    private record MenuItem(string Label, string Href, string Icon, bool ShowMakeupBadge = false);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += HandleLocationChanged;
+        lastRoleLoaded = UserRole;
+        await RefreshBadgeCountAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.Equals(lastRoleLoaded, UserRole, StringComparison.Ordinal))
+        {
+            lastRoleLoaded = UserRole;
+            await RefreshBadgeCountAsync();
+        }
+    }
+
+    private async void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        await RefreshBadgeCountAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshBadgeCountAsync()
+    {
+        var user = await CurrentUser.GetCurrentUserAsync();
+        if (!user.IsAuthenticated)
+        {
+            makeupBadgeCount = 0;
+            return;
+        }
+
+        // Use an isolated DI scope so Sidebar queries never overlap with page DbContext queries
+        using var scope = ScopeFactory.CreateScope();
+        var makeupService = scope.ServiceProvider.GetRequiredService<MakeupService>();
+
+        if (user.Role == Role.Coordinator && !string.IsNullOrEmpty(user.ProgramId))
+        {
+            makeupBadgeCount = await makeupService.GetPendingRequestCountForProgramAsync(user.ProgramId);
+        }
+        else if (user.Role == Role.Teacher && !string.IsNullOrEmpty(user.TeacherId))
+        {
+            makeupBadgeCount = await makeupService.GetReviewRequestedCountForTeacherAsync(user.TeacherId);
+        }
+        else
+        {
+            makeupBadgeCount = 0;
+        }
+    }
+
+    private IReadOnlyList<MenuItem> GetMenuItems() => UserRole switch
+    {
+        nameof(Role.Coordinator) => new List<MenuItem>
+        {
+            new("Dashboard", "/coordinator/dashboard", "bi-speedometer2"),
+            new("Faculty", "/coordinator/faculty", "bi-people"),
+            new("Teacher Timetables", "/coordinator/teacher-timetables", "bi-person-workspace"),
+            new("Section Timetables", "/coordinator/section-timetables", "bi-grid-3x3-gap"),
+            new("Room Timetables", "/coordinator/room-timetables", "bi-building"),
+            new("Makeup Requests", "/coordinator/makeup-requests", "bi-calendar-check", ShowMakeupBadge: true)
+        },
+        nameof(Role.Teacher) => new List<MenuItem>
+        {
+            new("Dashboard", "/teacher/dashboard", "bi-speedometer2"),
+            new("My Courses", "/teacher/my-courses", "bi-book"),
+            new("My Timetable", "/teacher/my-timetable", "bi-calendar-week"),
+            new("Makeup Requests", "/teacher/makeup-requests", "bi-calendar-plus", ShowMakeupBadge: true)
+        },
+        _ => Array.Empty<MenuItem>()
+    };
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= HandleLocationChanged;
+    }
+}
