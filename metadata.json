@@ -1,6 +1,0 @@
-{
-  "name": "Timetable & Makeup Portal",
-  "description": "University Timetable & Makeup Class Portal built with .NET 8 Blazor Interactive Server.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
