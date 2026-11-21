@@ -421,11 +421,30 @@ else
                         @if (freeStartOptions.Count == 0)
                         {
                             <div class="alert alert-warning small mb-0">
-                                No conflict-free @activeDurationHours-hour blocks with an adequate room are available in this week or next week.
+                                No conflict-free @activeDurationHours-hour blocks with an adequate room are available in the next @MakeupAvailabilityService.LookaheadWeeks weeks. Your section may already be fully booked for these hours.
                             </div>
                         }
                         else
                         {
+                            var allWeeks = GetDisplayWeeks();
+                            var shownIndex = Math.Min(weekIndex, allWeeks.Count - 1);
+                            var shownWeek = allWeeks[shownIndex];
+                            var freeThisWeek = freeStartOptions.Count(o => shownWeek.Dates.Contains(o.Date.Date));
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        disabled="@(shownIndex == 0)" @onclick="() => weekIndex = shownIndex - 1">
+                                    <i class="bi bi-chevron-left"></i> Previous week
+                                </button>
+                                <div class="text-center small">
+                                    <strong>Week @(shownIndex + 1) of @allWeeks.Count &middot; @shownWeek.Title</strong>
+                                    <div class="text-muted">@freeThisWeek free start slot(s) this week</div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        disabled="@(shownIndex >= allWeeks.Count - 1)" @onclick="() => weekIndex = shownIndex + 1">
+                                    Next week <i class="bi bi-chevron-right"></i>
+                                </button>
+                            </div>
+
                             <div class="table-responsive">
                                 <table class="table table-bordered table-sm align-middle mb-0">
                                     <thead class="table-light">
@@ -441,7 +460,7 @@ else
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        @foreach (var week in GetDisplayWeeks())
+                                        @foreach (var week in GetDisplayWeeks().Skip(weekIndex).Take(1))
                                         {
                                             <tr class="table-secondary">
                                                 <td colspan="10" class="fw-semibold small py-1">@week.Title</td>
@@ -642,6 +661,7 @@ else
     private List<FreeStartOption> freeStartOptions = new();
     private Dictionary<(DateTime Date, int Slot), FreeStartOption> freeOptionLookup = new();
     private List<PreferredSlot> selectedPreferred = new();
+    private int weekIndex;
 
     // Withdraw confirmation modal state
     private bool withdrawConfirmOpen;
@@ -819,6 +839,10 @@ else
             DateTime.Today);
 
         freeOptionLookup = freeStartOptions.ToDictionary(o => (o.Date.Date, o.StartSlot));
+
+        // Open the first week that has a free slot
+        var weeksNow = GetDisplayWeeks();
+        weekIndex = Math.Max(0, weeksNow.FindIndex(w => freeStartOptions.Any(o => w.Dates.Contains(o.Date.Date))));
         isLoadingFreeSlots = false;
     }
 
@@ -1020,30 +1044,11 @@ else
         await LoadDataAsync();
     }
 
-    private static List<(string Title, List<DateTime> Dates)> GetDisplayWeeks()
-    {
-        var today = DateTime.Today;
-        var (thisMonday, _) = TimetableService.GetWeekRange(today);
-        var nextMonday = thisMonday.AddDays(7);
-
-        var weeks = new List<(string Title, List<DateTime> Dates)>();
-
-        var thisWeekDates = Enumerable.Range(0, 5)
-            .Select(i => thisMonday.AddDays(i))
+    private static List<(string Title, List<DateTime> Dates)> GetDisplayWeeks() =>
+        MakeupAvailabilityService.GetBookableWeekMondays(DateTime.Today)
+            .Select(m => (Title: $"{m:dd MMM} - {m.AddDays(4):dd MMM yyyy}",
+                          Dates: Enumerable.Range(0, 5).Select(i => m.AddDays(i)).ToList()))
             .ToList();
-
-        if (thisWeekDates.Any(d => d.Date > today))
-        {
-            weeks.Add(($"This Week ({thisMonday:dd MMM} - {thisMonday.AddDays(4):dd MMM})", thisWeekDates));
-        }
-
-        var nextWeekDates = Enumerable.Range(0, 5)
-            .Select(i => nextMonday.AddDays(i))
-            .ToList();
-
-        weeks.Add(($"Next Week ({nextMonday:dd MMM} - {nextMonday.AddDays(4):dd MMM})", nextWeekDates));
-        return weeks;
-    }
 
     private static void ParseReason(string fullReason, out string category, out string details)
     {
