@@ -13,6 +13,22 @@ public class MakeupAvailabilityService
     public const int LunchSlotNumber = 5; // 12:00 - 13:00 (never offered or crossed)
     public const int MaxSlotNumber = 9;   // 16:00 - 17:00
     public const int MaxMissedAgeDays = 120;
+    public const int LookaheadWeeks = 3;
+
+    /// <summary>
+    /// Mondays of the upcoming bookable weeks. The current week is included only while
+    /// it still has a weekday after today (Mon-Thu); from Friday on, the list starts next Monday.
+    /// </summary>
+    public static List<DateTime> GetBookableWeekMondays(DateTime today)
+    {
+        var (monday, _) = TimetableService.GetWeekRange(today.Date);
+        if (today.DayOfWeek is DayOfWeek.Friday or DayOfWeek.Saturday or DayOfWeek.Sunday)
+        {
+            monday = monday.AddDays(7);
+        }
+
+        return Enumerable.Range(0, LookaheadWeeks).Select(i => monday.AddDays(7 * i)).ToList();
+    }
 
     private readonly AppDbContext _db;
 
@@ -24,7 +40,7 @@ public class MakeupAvailabilityService
     /// <summary>
     /// Returns the teacher's regular (non-makeup) scheduled sessions for an assignment
     /// on the weekday of missedDate, grouping consecutive hourly slots into one session.
-    /// Rejects weekends, future dates, and dates older than 14 days.
+    /// Rejects weekends, future dates, and dates older than MaxMissedAgeDays.
     /// </summary>
     public async Task<List<MissedSessionOption>> GetMissedSessionOptionsAsync(
         string teacherId,
@@ -86,7 +102,7 @@ public class MakeupAvailabilityService
     }
 
     /// <summary>
-    /// Computes conflict-free start slots from tomorrow through Friday of next week (Mon-Fri),
+    /// Computes conflict-free start slots from tomorrow through Friday of the last bookable week (Mon-Fri, see LookaheadWeeks),
     /// ensuring the full block avoids lunch slot 5, stays within slots 1..9, has no teacher or
     /// section conflict, and has at least one suitable room free for every hour of the block.
     /// </summary>
@@ -135,8 +151,7 @@ public class MakeupAvailabilityService
 
         var todayDate = today.Date;
         var startDate = todayDate.AddDays(1);
-        var (thisMonday, _) = TimetableService.GetWeekRange(todayDate);
-        var endDate = thisMonday.AddDays(11); // Friday of next week
+        var endDate = GetBookableWeekMondays(todayDate).Last().AddDays(4); // Friday of the last bookable week
 
         var results = new List<FreeStartOption>();
 
@@ -332,32 +347,34 @@ public class MakeupAvailabilityService
 
         return (true, null);
     }
-/// <summary>Returns why a block cannot be approved, or null if it is fine.</summary>
-public async Task<string?> GetBlockProblemAsync(
-    string programId, string teacherId, string sectionId, string courseId,
-    DateTime date, int startSlot, int hours)
-{
-    var targetDate = date.Date;
-    if (!IsValidBlockRange(startSlot, hours))
-        return "The block crosses lunch or goes outside 08:00-17:00.";
 
-    var blockSlots = Enumerable.Range(startSlot, hours).ToArray();
-    var entries = await _db.TimetableEntries
-        .Where(e => e.ProgramId == programId && e.DayOfWeek == targetDate.DayOfWeek)
-        .ToListAsync();
+    /// <summary>Returns why a block cannot be approved, or null if it is fine.</summary>
+    public async Task<string?> GetBlockProblemAsync(
+        string programId, string teacherId, string sectionId, string courseId,
+        DateTime date, int startSlot, int hours)
+    {
+        var targetDate = date.Date;
+        if (!IsValidBlockRange(startSlot, hours))
+            return "The block crosses lunch or goes outside 08:00-17:00.";
 
-    if (!BlockFree(entries, blockSlots, e => e.TeacherId == teacherId, targetDate))
-        return "The teacher already has a class at that time.";
+        var blockSlots = Enumerable.Range(startSlot, hours).ToArray();
+        var entries = await _db.TimetableEntries
+            .Where(e => e.ProgramId == programId && e.DayOfWeek == targetDate.DayOfWeek)
+            .ToListAsync();
 
-    if (!BlockFree(entries, blockSlots, e => e.SectionId == sectionId, targetDate))
-        return "The section already has a class at that time (for example another approved makeup).";
+        if (!BlockFree(entries, blockSlots, e => e.TeacherId == teacherId, targetDate))
+            return "The teacher already has a class at that time.";
 
-    var rooms = await GetFreeRoomsForBlockAsync(programId, courseId, sectionId, date, startSlot, hours);
-    if (rooms.Count == 0)
-        return "No suitable room is free for the whole block.";
+        if (!BlockFree(entries, blockSlots, e => e.SectionId == sectionId, targetDate))
+            return "The section already has a class at that time (for example another approved makeup).";
 
-    return null;
-}
+        var rooms = await GetFreeRoomsForBlockAsync(programId, courseId, sectionId, date, startSlot, hours);
+        if (rooms.Count == 0)
+            return "No suitable room is free for the whole block.";
+
+        return null;
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
