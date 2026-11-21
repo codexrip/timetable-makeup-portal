@@ -158,7 +158,7 @@
                                         else
                                         {
                                             <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">
-                                                <i class="bi bi-x-circle me-1"></i>No longer available
+                                               <i class="bi bi-x-circle me-1"></i>@(opt.UnavailableReason ?? "No longer available")
                                             </span>
                                         }
                                     </div>
@@ -373,6 +373,7 @@ else
         public int DurationHours { get; init; }
         public List<Room> FreeRooms { get; init; } = new();
         public bool IsAvailable { get; init; }
+        public string? UnavailableReason { get; init; }
         public string SelectedRoomId { get; set; } = string.Empty;
         public string Key => $"{Date:yyyyMMdd}_{StartSlot}";
     }
@@ -477,6 +478,9 @@ else
                     req.CourseId);
                 isAvailable = ok;
             }
+            string? reason = isAvailable ? null
+    : await AvailabilityService.GetBlockProblemAsync(
+        programId, req.TeacherId, req.SectionId, req.CourseId, pref.Date, pref.StartSlot, hours);
 
             builtOptions.Add(new PreferredSlotOption
             {
@@ -485,7 +489,8 @@ else
                 DurationHours = hours,
                 FreeRooms = freeRooms,
                 IsAvailable = isAvailable,
-                SelectedRoomId = isAvailable ? freeRooms[0].Id : string.Empty
+                SelectedRoomId = isAvailable ? freeRooms[0].Id : string.Empty,
+                UnavailableReason = reason
             });
         }
 
