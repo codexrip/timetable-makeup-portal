@@ -157,8 +157,8 @@
                                         }
                                         else
                                         {
-                                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">
-                                               <i class="bi bi-x-circle me-1"></i>@(opt.UnavailableReason ?? "No longer available")
+                                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle text-wrap text-start">
+                                                <i class="bi bi-x-circle me-1"></i>@(opt.UnavailableReason ?? "No longer available")
                                             </span>
                                         }
                                     </div>
@@ -478,9 +478,10 @@ else
                     req.CourseId);
                 isAvailable = ok;
             }
-            string? reason = isAvailable ? null
-    : await AvailabilityService.GetBlockProblemAsync(
-        programId, req.TeacherId, req.SectionId, req.CourseId, pref.Date, pref.StartSlot, hours);
+            string? reason = isAvailable
+                ? null
+                : await AvailabilityService.GetBlockProblemAsync(
+                    programId, req.TeacherId, req.SectionId, req.CourseId, pref.Date, pref.StartSlot, hours);
 
             builtOptions.Add(new PreferredSlotOption
             {
