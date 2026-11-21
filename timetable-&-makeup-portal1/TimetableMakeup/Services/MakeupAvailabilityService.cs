@@ -12,7 +12,7 @@ public class MakeupAvailabilityService
 {
     public const int LunchSlotNumber = 5; // 12:00 - 13:00 (never offered or crossed)
     public const int MaxSlotNumber = 9;   // 16:00 - 17:00
-    public const int MaxMissedAgeDays = 14;
+    public const int MaxMissedAgeDays = 120;
 
     private readonly AppDbContext _db;
 
@@ -332,7 +332,32 @@ public class MakeupAvailabilityService
 
         return (true, null);
     }
+/// <summary>Returns why a block cannot be approved, or null if it is fine.</summary>
+public async Task<string?> GetBlockProblemAsync(
+    string programId, string teacherId, string sectionId, string courseId,
+    DateTime date, int startSlot, int hours)
+{
+    var targetDate = date.Date;
+    if (!IsValidBlockRange(startSlot, hours))
+        return "The block crosses lunch or goes outside 08:00-17:00.";
 
+    var blockSlots = Enumerable.Range(startSlot, hours).ToArray();
+    var entries = await _db.TimetableEntries
+        .Where(e => e.ProgramId == programId && e.DayOfWeek == targetDate.DayOfWeek)
+        .ToListAsync();
+
+    if (!BlockFree(entries, blockSlots, e => e.TeacherId == teacherId, targetDate))
+        return "The teacher already has a class at that time.";
+
+    if (!BlockFree(entries, blockSlots, e => e.SectionId == sectionId, targetDate))
+        return "The section already has a class at that time (for example another approved makeup).";
+
+    var rooms = await GetFreeRoomsForBlockAsync(programId, courseId, sectionId, date, startSlot, hours);
+    if (rooms.Count == 0)
+        return "No suitable room is free for the whole block.";
+
+    return null;
+}
     // =========================================================================
     // Helpers
     // =========================================================================
