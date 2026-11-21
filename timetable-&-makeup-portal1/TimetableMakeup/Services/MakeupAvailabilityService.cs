@@ -10,7 +10,7 @@ namespace TimetableMakeup.Services;
 /// </summary>
 public class MakeupAvailabilityService
 {
-    public const int LunchSlotNumber = 5; // 12:00 - 13:00 (never offered or crossed)
+    public const int LunchSlotNumber = 0; // 12:00 - 13:00 (never offered or crossed)
     public const int MaxSlotNumber = 9;   // 16:00 - 17:00
     public const int MaxMissedAgeDays = 120;
     public const int LookaheadWeeks = 3;
