@@ -74,7 +74,7 @@ public class MakeupService
         var matchedSession = missedOptions.FirstOrDefault(o => o.StartSlot == missedSlotNumber);
         if (matchedSession is null)
         {
-            return (false, "You do not have a scheduled class for this course and slot on that date (must be within the last 14 days, Mon-Fri).");
+            return (false, $"You do not have a scheduled class for this course and slot on that date (must be within the last {MakeupAvailabilityService.MaxMissedAgeDays} days, Mon-Fri).");
         }
 
         var (slotsOk, normalizedSlots, slotError) = await ValidatePreferredSlotsAsync(
